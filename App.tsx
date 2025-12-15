@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { User, UserRole } from './types';
-import { LogOut, ArrowLeft } from 'lucide-react';
+import { LogOut, ArrowLeft, Cloud, CloudOff } from 'lucide-react';
+import { isFirebaseConfigured, initCloudSync } from './services/storage';
 
 // Pages
 import LoginPage from './components/pages/Login';
@@ -24,6 +25,7 @@ export const AuthContext = React.createContext<{
 const Container: React.FC<{ children: React.ReactNode; title?: string; showBack?: boolean }> = ({ children, title, showBack }) => {
   const { user, logout } = React.useContext(AuthContext);
   const navigate = useNavigate();
+  const isCloudConnected = isFirebaseConfigured();
 
   if (!user) return <Navigate to="/login" />;
 
@@ -41,6 +43,16 @@ const Container: React.FC<{ children: React.ReactNode; title?: string; showBack?
             <h1 className="text-xl font-bold tracking-tight">{title || 'AviControl'}</h1>
           </div>
           <div className="flex items-center space-x-4">
+            
+            {/* Connection Status Indicator */}
+            <div 
+              title={isCloudConnected ? "Sistema Conectado a la Nube (Firebase)" : "Modo Local: Datos solo en este dispositivo"} 
+              className={`hidden sm:flex items-center px-3 py-1.5 rounded-full text-xs font-bold border ${isCloudConnected ? 'bg-emerald-900/50 text-emerald-400 border-emerald-700' : 'bg-slate-800 text-slate-400 border-slate-700'}`}
+            >
+               {isCloudConnected ? <Cloud size={14} className="mr-2"/> : <CloudOff size={14} className="mr-2"/>}
+               {isCloudConnected ? "EN LÍNEA" : "LOCAL"}
+            </div>
+
             <div className="text-right hidden sm:block">
               <p className="text-sm font-semibold text-blue-100">{user.name}</p>
               <p className="text-xs text-blue-300">{user.role}</p>
@@ -69,8 +81,14 @@ const App = () => {
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
+    // 1. Check Login
     const saved = localStorage.getItem('avi_session');
     if (saved) setUser(JSON.parse(saved));
+
+    // 2. Initialize Cloud
+    if (isFirebaseConfigured()) {
+        initCloudSync();
+    }
   }, []);
 
   const handleLogin = (u: User) => {

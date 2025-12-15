@@ -39,8 +39,22 @@ const WeighingStation: React.FC = () => {
 
   useEffect(() => {
     loadOrders();
+    // Listen for Cloud Updates
+    const handleUpdate = () => {
+        loadOrders();
+        // If an order is active, refresh it from the updated list
+        if (activeOrder) {
+            const updatedList = getOrders();
+            const found = updatedList.find(o => o.id === activeOrder.id);
+            if (found) setActiveOrder(found);
+        }
+    };
+    window.addEventListener('avi_data_orders', handleUpdate);
+    
     setDefaultQuantity();
     setTimeout(() => weightInputRef.current?.focus(), 100);
+
+    return () => window.removeEventListener('avi_data_orders', handleUpdate);
   }, [mode, batchId]);
 
   useEffect(() => {

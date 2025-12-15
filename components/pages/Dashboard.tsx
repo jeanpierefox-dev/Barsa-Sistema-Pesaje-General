@@ -1,4 +1,4 @@
-import React, { useContext } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Package, Calculator, Users, FileText, Settings, ArrowRight, Bird, Box } from 'lucide-react';
 import { AuthContext } from '../../App';
@@ -9,6 +9,18 @@ const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useContext(AuthContext);
   const config = getConfig();
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  // Force re-render when data comes from cloud
+  useEffect(() => {
+    const handleDataUpdate = () => setRefreshKey(prev => prev + 1);
+    window.addEventListener('avi_data_batches', handleDataUpdate);
+    window.addEventListener('avi_data_orders', handleDataUpdate);
+    return () => {
+        window.removeEventListener('avi_data_batches', handleDataUpdate);
+        window.removeEventListener('avi_data_orders', handleDataUpdate);
+    };
+  }, []);
 
   const MenuCard = ({ title, desc, icon, onClick, color, roles, compact = false, mode }: any) => {
     if (!roles.includes(user?.role)) return null;
