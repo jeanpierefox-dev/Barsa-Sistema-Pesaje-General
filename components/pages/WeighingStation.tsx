@@ -353,75 +353,155 @@ const WeighingStation: React.FC = () => {
   };
   
   const generateDetailPDF = () => {
-      if(!activeOrder) return;
-      const totals = getTotals(activeOrder);
-      const doc = new jsPDF();
+    if(!activeOrder) return;
+    const totals = getTotals(activeOrder);
+    const doc = new jsPDF();
+    
+    // Config Data
+    const company = config.companyName || 'AVICOLA';
+    const logo = config.logoUrl;
+    const date = new Date().toLocaleString();
+    const batchInfo = batchId ? getBatches().find(b => b.id === batchId)?.name : 'N/A';
+    
+    // Styles
+    const primaryColor = [23, 37, 84]; // Navy Blue (#172554)
+    const secondaryColor = [241, 245, 249]; // Slate 100
+    
+    // --- HEADER ---
+    // Logo
+    if (logo) {
+        try { doc.addImage(logo, 'PNG', 14, 10, 20, 20); } catch (e) {}
+    }
+    
+    // Company Title
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+    doc.text(company.toUpperCase(), 105, 18, { align: 'center' });
+    
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100);
+    doc.text("REPORTE DETALLADO DE PESAJE", 105, 24, { align: 'center' });
+    
+    // --- INFO CARD ---
+    autoTable(doc, {
+        startY: 35,
+        theme: 'plain',
+        styles: { fontSize: 10, cellPadding: 1 },
+        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 25 }, 1: { cellWidth: 70 }, 2: { fontStyle: 'bold', cellWidth: 25 } },
+        body: [
+            ['Cliente:', activeOrder.clientName, 'Fecha:', date],
+            ['Lote/Ref:', batchInfo || 'Venta Directa', 'Operador:', user?.name || 'Admin'],
+            ['Estado:', activeOrder.status === 'CLOSED' ? 'CERRADO' : 'ABIERTO', 'Ticket ID:', activeOrder.id.slice(-6)]
+        ]
+    });
 
-      doc.setFontSize(16);
-      doc.text(`Detalle de Pesaje: ${activeOrder.clientName}`, 14, 20);
-      doc.setFontSize(10);
-      doc.text(`Fecha: ${new Date().toLocaleString()}`, 14, 28);
-      
-      // HEADER SUMMARY
-      doc.setDrawColor(200);
-      doc.line(14, 32, 196, 32);
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "bold");
-      
-      let y = 40;
-      doc.text("Resumen Total:", 14, y);
-      y += 6;
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-      doc.text(`Bruto (Llenas): ${totals.fullCratesCount} und | ${totals.totalFullWeight.toFixed(2)} kg`, 14, y);
-      y += 5;
-      doc.text(`Tara (Vacías): ${totals.emptyCratesCount} und | ${totals.totalEmptyWeight.toFixed(2)} kg`, 14, y);
-      y += 5;
-      doc.text(`Merma: ${totals.mortCount} und | ${totals.totalMortWeight.toFixed(2)} kg`, 14, y);
-      y += 6;
-      doc.setFont("helvetica", "bold");
-      doc.text(`PESO NETO: ${totals.netWeight.toFixed(2)} kg`, 14, y);
-      
-      doc.line(14, y+4, 196, y+4);
+    // --- EXECUTIVE SUMMARY (The "Corporate" Box) ---
+    autoTable(doc, {
+        startY: (doc as any).lastAutoTable.finalY + 5,
+        theme: 'grid',
+        headStyles: { fillColor: primaryColor, textColor: 255, fontStyle: 'bold', halign: 'center' },
+        columnStyles: { 
+            0: { cellWidth: 60, fontStyle: 'bold' }, 
+            1: { halign: 'center' }, 
+            2: { halign: 'right' } 
+        },
+        head: [['CONCEPTO', 'CANTIDAD (Und/Jabas)', 'PESO TOTAL (kg)']],
+        body: [
+            ['JABAS LLENAS (Bruto)', totals.fullCratesCount, totals.totalFullWeight.toFixed(2)],
+            ['JABAS VACÍAS (Tara)', totals.emptyCratesCount, totals.totalEmptyWeight.toFixed(2)],
+            ['MERMA / MORTALIDAD', totals.mortCount, totals.totalMortWeight.toFixed(2)],
+            // Empty row for spacing
+            [{ content: '', colSpan: 3, styles: { cellPadding: 1, fillColor: [255, 255, 255] } }],
+            // Net Totals
+            [
+                { content: 'PESO NETO TOTAL', styles: { fontSize: 12, textColor: primaryColor, fillColor: secondaryColor } },
+                { content: totals.estimatedChickens > 0 ? `${totals.estimatedChickens} Aves (Est.)` : '-', styles: { halign: 'center', fontSize: 10, fillColor: secondaryColor } },
+                { content: totals.netWeight.toFixed(2), styles: { fontSize: 14, fontStyle: 'bold', halign: 'right', textColor: primaryColor, fillColor: secondaryColor } }
+            ]
+        ]
+    });
 
-      const prepareData = (type: 'FULL' | 'EMPTY' | 'MORTALITY') => {
-          return activeOrder.records
+    const summaryY = (doc as any).lastAutoTable.finalY + 10;
+    
+    doc.setFontSize(11);
+    doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+    doc.setFont("helvetica", "bold");
+    doc.text("DETALLE DE MOVIMIENTOS", 14, summaryY);
+    
+    // --- DETAIL TABLES ---
+    // Helper to sort and map
+    const getTableData = (type: 'FULL' | 'EMPTY' | 'MORTALITY') => {
+        return activeOrder.records
             .filter(r => r.type === type)
             .sort((a,b) => a.timestamp - b.timestamp)
-            .map(r => [new Date(r.timestamp).toLocaleTimeString(), r.quantity, r.weight.toFixed(2)]);
-      };
+            .map((r, i) => [
+                (i + 1).toString(),
+                new Date(r.timestamp).toLocaleTimeString(),
+                r.quantity,
+                r.weight.toFixed(2)
+            ]);
+    };
 
-      // TABLES WITH QUANTITY
-      const tableY = y + 10;
-      
-      autoTable(doc, {
-          startY: tableY,
-          head: [['Hora', 'Cant.', 'Peso (Llenas)']],
-          body: prepareData('FULL'),
-          theme: 'grid',
-          margin: { right: 140 },
-          styles: { fontSize: 8 }
-      });
+    const fullData = getTableData('FULL');
+    const emptyData = getTableData('EMPTY');
+    
+    let currentY = summaryY + 5;
 
-      autoTable(doc, {
-          startY: tableY,
-          head: [['Hora', 'Cant.', 'Peso (Vacías)']],
-          body: prepareData('EMPTY'),
-          theme: 'grid',
-          margin: { left: 80, right: 70 },
-          styles: { fontSize: 8 }
-      });
+    // Table: Jabas Llenas
+    if (fullData.length > 0) {
+        autoTable(doc, {
+            startY: currentY,
+            head: [['#', 'Hora', 'Jabas', 'Peso (kg)']],
+            body: fullData,
+            theme: 'striped',
+            headStyles: { fillColor: [30, 58, 138] }, // Dark Blue
+            styles: { fontSize: 9 },
+            columnStyles: { 3: { halign: 'right', fontStyle: 'bold' }, 2: { halign: 'center' } },
+            margin: { right: 110 } // Use half page
+        });
+    }
 
-      autoTable(doc, {
-          startY: tableY,
-          head: [['Hora', 'Cant.', 'Peso (Merma)']],
-          body: prepareData('MORTALITY'),
-          theme: 'grid',
-          margin: { left: 150 },
-          styles: { fontSize: 8 }
-      });
+    // Table: Jabas Vacias (Right side)
+    if (emptyData.length > 0) {
+        autoTable(doc, {
+            startY: currentY,
+            head: [['#', 'Hora', 'Jabas', 'Peso (kg)']],
+            body: emptyData,
+            theme: 'striped',
+            headStyles: { fillColor: [194, 65, 12] }, // Orange
+            styles: { fontSize: 9 },
+            columnStyles: { 3: { halign: 'right', fontStyle: 'bold' }, 2: { halign: 'center' } },
+            margin: { left: 110 } // Use other half
+        });
+    }
+    
+    // Mortality Table (Bottom, full width if needed)
+    const mortData = getTableData('MORTALITY');
+    if (mortData.length > 0) {
+        autoTable(doc, {
+            startY: (doc as any).lastAutoTable.finalY + 10,
+            head: [['#', 'Hora', 'Cantidad Aves', 'Peso (kg)']],
+            body: mortData,
+            theme: 'striped',
+            headStyles: { fillColor: [185, 28, 28] }, // Red
+            styles: { fontSize: 9 },
+            columnStyles: { 3: { halign: 'right', fontStyle: 'bold' }, 2: { halign: 'center' } }
+        });
+    }
 
-      doc.save(`Detalle_${activeOrder.clientName}.pdf`);
+    // Footer
+    const pageCount = (doc as any).internal.getNumberOfPages();
+    for(let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(150);
+        doc.text(`Generado por AviControl Pro - ${new Date().toLocaleString()}`, 10, 285);
+        doc.text(`Página ${i} de ${pageCount}`, 190, 285, { align: 'right' });
+    }
+
+    doc.save(`Reporte_${activeOrder.clientName.replace(/\s+/g, '_')}.pdf`);
   };
 
   const ConsolidatedDetail = () => {
@@ -507,7 +587,7 @@ const WeighingStation: React.FC = () => {
 
                 <div className="p-4 border-t border-slate-300 flex justify-end gap-3 bg-white rounded-b-2xl">
                     <button onClick={generateDetailPDF} className="bg-slate-100 text-blue-900 px-6 py-3 rounded-xl font-bold flex items-center hover:bg-slate-200 border border-slate-300 shadow-lg">
-                        <FileText size={20} className="mr-2"/> Convertir a PDF
+                        <FileText size={20} className="mr-2"/> Reporte PDF Corporativo
                     </button>
                     {/* Removed Print Ticket Button as requested */}
                 </div>
