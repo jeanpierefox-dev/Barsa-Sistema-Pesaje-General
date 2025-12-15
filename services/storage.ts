@@ -1,6 +1,6 @@
 import { User, UserRole, Batch, ClientOrder, AppConfig } from '../types';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, enableIndexedDbPersistence, initializeFirestore, CACHE_SIZE_UNLIMITED } from 'firebase/firestore';
 
 const KEYS = {
   USERS: 'avi_users',
@@ -14,7 +14,7 @@ const KEYS = {
 let db: any = null;
 let unsubscribers: Function[] = [];
 
-export const initCloudSync = () => {
+export const initCloudSync = async () => {
   const config = getConfig();
   
   // Clean up previous listeners if any
@@ -23,11 +23,26 @@ export const initCloudSync = () => {
 
   if (config.firebaseConfig?.apiKey && config.firebaseConfig?.projectId) {
     try {
-      // Avoid re-initializing if app already exists in memory (naive check)
       const app = initializeApp(config.firebaseConfig);
-      db = getFirestore(app);
-      console.log("☁️ Nube conectada: Sincronizando datos...");
       
+      // Initialize Firestore with Offline Persistence enabled
+      // This is crucial for mobile devices with flaky connections
+      db = initializeFirestore(app, {
+          cacheSizeBytes: CACHE_SIZE_UNLIMITED
+      });
+
+      try {
+          await enableIndexedDbPersistence(db);
+          console.log("💾 Persistencia Offline Activada");
+      } catch (err: any) {
+          if (err.code == 'failed-precondition') {
+              console.warn("Persistencia falló: Múltiples pestañas abiertas.");
+          } else if (err.code == 'unimplemented') {
+              console.warn("El navegador no soporta persistencia.");
+          }
+      }
+
+      console.log("☁️ Nube conectada: Sincronizando datos...");
       startListeners();
     } catch (e) {
       console.error("Error al conectar con Firebase:", e);
@@ -38,23 +53,64 @@ export const initCloudSync = () => {
 const startListeners = () => {
   if (!db) return;
 
-  // Helper to sync collection to localStorage
+  // Helper to sync collection to localStorage with "Smart Merge"
   const syncCollection = (colName: string, storageKey: string, eventName: string) => {
     const q = collection(db, colName);
-    const unsub = onSnapshot(q, (snapshot) => {
+    
+    const unsub = onSnapshot(q, { includeMetadataChanges: true }, (snapshot) => {
       const remoteData: any[] = [];
       snapshot.forEach((doc) => {
         remoteData.push(doc.data());
       });
       
-      // Update Local Storage with Remote Data
-      // We only update if remote has data to avoid wiping local on empty init
-      if (remoteData.length > 0 || snapshot.empty) {
-        localStorage.setItem(storageKey, JSON.stringify(remoteData));
-        // Trigger UI update
+      // SMART MERGE LOGIC (Crucial for Mobile/Offline)
+      // We don't just overwrite localStorage with remoteData.
+      // We check if we have LOCAL items that are NOT in remote yet (pending upload).
+      // If we blindly overwrite, we lose items created while offline/bad signal.
+      
+      const currentLocal = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      const remoteIds = new Set(remoteData.map(d => d.id));
+      
+      const pendingUploadItems = currentLocal.filter((localItem: any) => {
+          // If it's already in remote, we use the remote version (it updates automatically below)
+          if (remoteIds.has(localItem.id)) return false;
+
+          // Item is in Local but NOT in Remote.
+          // Is it a brand new item? (Created < 1 hour ago)
+          // We assume missing items created recently are "Pending Upload", not "Deleted by Admin".
+          
+          let timestamp = localItem.createdAt || localItem.timestamp;
+          
+          // Fallback: Try to parse ID if it's timestamp-based (which our app uses: Date.now().toString())
+          if (!timestamp && localItem.id && !isNaN(Number(localItem.id))) {
+              timestamp = Number(localItem.id);
+          }
+
+          if (timestamp) {
+              const now = Date.now();
+              // Keep local item if created less than 1 hour ago.
+              // This gives ample time for mobile to reconnect and upload.
+              if ((now - timestamp) < 3600000) { 
+                  return true; 
+              }
+          }
+          
+          return false; // Old item not in remote? It was likely deleted legitimately. Let it go.
+      });
+
+      // Merge: Remote Data (Source of Truth) + Pending Local Items
+      const mergedData = [...remoteData, ...pendingUploadItems];
+      
+      // Remove duplicates by ID (Remote takes precedence)
+      const uniqueData = Array.from(new Map(mergedData.map(item => [item.id, item])).values());
+
+      // Only update if we have data or if it's a deliberate clear
+      if (uniqueData.length > 0 || snapshot.empty) {
+        localStorage.setItem(storageKey, JSON.stringify(uniqueData));
         window.dispatchEvent(new Event(eventName));
       }
     });
+    
     unsubscribers.push(unsub);
   };
 
@@ -97,7 +153,9 @@ const writeToCloud = async (collectionName: string, data: any) => {
     try {
       await setDoc(doc(db, collectionName, data.id), data);
     } catch (e) {
-      console.error("Error writing to cloud:", e);
+      console.error(`Error writing ${collectionName} to cloud:`, e);
+      // NOTE: We do not need to retry manually. 
+      // Firestore SDK automatically queues writes when offline and syncs when online.
     }
   }
 };
