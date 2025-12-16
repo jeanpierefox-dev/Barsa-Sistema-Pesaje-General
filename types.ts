@@ -61,19 +61,9 @@ export interface Batch {
 
 export interface AppConfig {
   companyName: string;
-  organizationId?: string; // New field for multi-tenancy or identification
   logoUrl: string; // Base64 or URL
   printerConnected: boolean;
   scaleConnected: boolean;
   defaultFullCrateBatch: number; // e.g., 5
   defaultEmptyCrateBatch: number; // e.g., 10
-  firebaseConfig?: {
-    apiKey: string;
-    authDomain: string;
-    databaseURL?: string;
-    projectId: string;
-    storageBucket?: string;
-    messagingSenderId?: string;
-    appId: string;
-  };
 }

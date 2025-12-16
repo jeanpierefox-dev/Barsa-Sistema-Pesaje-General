@@ -1,48 +1,22 @@
-import React, { useState, useContext, useEffect } from 'react';
+import React, { useState, useContext } from 'react';
 import { AppConfig, UserRole } from '../../types';
-import { getConfig, saveConfig, resetApp, isFirebaseConfigured, restoreBackup } from '../../services/storage';
-import { Save, Check, AlertTriangle, Cloud, Download, Upload, HardDriveDownload, QrCode, Copy, X, ArrowDownCircle, Info, Settings, Building2, ChevronDown, ChevronUp, Users, Printer, Scale, Bluetooth } from 'lucide-react';
+import { getConfig, saveConfig, resetApp, restoreBackup } from '../../services/storage';
+import { Save, Check, AlertTriangle, Download, Upload, HardDriveDownload, Settings, Building2, Printer, Scale, ShieldAlert, Loader2 } from 'lucide-react';
 import { AuthContext } from '../../App';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
 const Configuration: React.FC = () => {
   const [config, setConfig] = useState<AppConfig>(getConfig());
   const [saved, setSaved] = useState(false);
   const { user } = useContext(AuthContext);
-  const [isConnected, setIsConnected] = useState(false);
-  
-  // Collapsed State for Linking
-  const [isLinkingExpanded, setIsLinkingExpanded] = useState(false);
-
-  // Connection State
-  const [showQR, setShowQR] = useState(false);
-  const [connectionToken, setConnectionToken] = useState('');
-  const [importTokenInput, setImportTokenInput] = useState('');
   
   // Backup State
   const [showBackupInput, setShowBackupInput] = useState(false);
   const [backupString, setBackupString] = useState('');
   
-  const location = useLocation();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-      setIsConnected(isFirebaseConfigured());
-  }, [config]);
-
-  // Handle Import Link (URL Param)
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const importToken = params.get('import');
-    if (importToken) {
-        processImportToken(importToken);
-    }
-  }, [location]);
-  
   const handleSave = () => {
     saveConfig(config);
     setSaved(true);
-    setIsConnected(isFirebaseConfigured());
     setTimeout(() => setSaved(false), 2000);
   };
 
@@ -58,73 +32,11 @@ const Configuration: React.FC = () => {
   };
 
   const handleReset = () => {
-    if (confirm('¡ADVERTENCIA CRÍTICA!\n\nEsto borrará TODOS los datos locales (usuarios, lotes, ventas) y restablecerá la aplicación.\n\nSi estás conectado a la nube, los datos de la nube no se borrarán, solo la conexión de este dispositivo.\n\n¿Estás seguro?')) {
+    if (confirm('¡ADVERTENCIA CRÍTICA!\n\nEsto borrará TODOS los datos locales (usuarios, lotes, ventas) y restablecerá la aplicación.\n\n¿Estás seguro?')) {
         if(confirm('Confirma por segunda vez: ¿Restablecer dispositivo?')) {
             resetApp();
         }
     }
-  };
-
-  // --- SYNC / LINKING LOGIC ---
-
-  const generateConnectionData = () => {
-      if (!config.firebaseConfig?.apiKey || !config.firebaseConfig?.projectId) {
-          alert("Faltan datos obligatorios (API Key o Project ID). Configura la conexión primero usando el icono de la Nube en la cabecera.");
-          return;
-      }
-      saveConfig(config);
-      
-      try {
-          const jsonStr = JSON.stringify(config.firebaseConfig);
-          const token = btoa(jsonStr); 
-          setConnectionToken(token);
-          setShowQR(true);
-      } catch (e) {
-          alert("Error al generar el código de vinculación.");
-      }
-  };
-
-  const processImportToken = (token: string) => {
-      if (!token) return;
-
-      try {
-          const cleanToken = token.replace(/\s/g, '');
-          let jsonStr = '';
-          try {
-             jsonStr = atob(cleanToken);
-          } catch(e) {
-             throw new Error("El código está incompleto o mal copiado (Error Base64).");
-          }
-
-          if (!jsonStr) throw new Error("El contenido del código está vacío.");
-
-          const parsed = JSON.parse(jsonStr);
-          
-          if (parsed.apiKey && parsed.projectId) {
-              const hasDbUrl = !!parsed.databaseURL;
-              const msg = `🔗 DATOS DE NUBE DETECTADOS\n\nProyecto: ${parsed.projectId}\nBase de Datos: ${hasDbUrl ? '✅ Configurada' : '⚠️ No especificada'}\n\n¿Desea vincular este dispositivo ahora?`;
-              
-              if (confirm(msg)) {
-                  const newConfig = { ...config, firebaseConfig: parsed };
-                  setConfig(newConfig);
-                  saveConfig(newConfig);
-                  alert("✅ ¡Vinculación Exitosa!\n\nEl sistema se reiniciará para sincronizar.");
-                  navigate('/config', { replace: true });
-                  window.location.reload();
-              }
-          } else {
-              alert("El código es válido pero le faltan datos (API Key o Project ID).");
-          }
-      } catch(e: any) {
-          console.error("Token error:", e);
-          alert(`Error al procesar el código: ${e.message}`);
-      }
-  };
-
-  const copyToClipboard = () => {
-      navigator.clipboard.writeText(connectionToken).then(() => {
-          alert("Código copiado al portapapeles");
-      });
   };
 
   // --- BACKUP LOGIC ---
@@ -137,45 +49,33 @@ const Configuration: React.FC = () => {
           backupDate: new Date().toISOString()
       };
       const jsonStr = JSON.stringify(data, null, 2);
-      
       const blob = new Blob([jsonStr], {type : 'application/json'});
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `RESPALDO_AVICOLA_${new Date().toISOString().split('T')[0]}.json`;
+      a.download = `RESPALDO_LOCAL_${new Date().toISOString().split('T')[0]}.json`;
       a.click();
       URL.revokeObjectURL(url);
   };
 
   const handleRestoreBackup = () => {
-      if (!backupString || !backupString.trim()) {
-          alert("Por favor, pegue el contenido JSON del respaldo.");
-          return;
-      }
-
+      if (!backupString.trim()) { alert("Pegue el JSON."); return; }
       try {
           const parsed = JSON.parse(backupString);
           if (parsed.users && parsed.config) {
-              if (confirm("¡ATENCIÓN! Esto SOBRESCRIBIRÁ todos los datos actuales con los del archivo de respaldo.\n\n¿Desea continuar?")) {
-                  restoreBackup(parsed);
-              }
-          } else {
-              alert("El archivo de respaldo no es válido o está incompleto (Faltan usuarios o configuración).");
-          }
-      } catch (e: any) {
-          console.error("Backup parse error:", e);
-          alert("Error de lectura: El texto no es un JSON válido.\n\n" + e.message);
-      }
+              if (confirm("¿Restaurar respaldo? Esto sobrescribirá datos.")) restoreBackup(parsed);
+          } else { alert("Respaldo inválido."); }
+      } catch (e: any) { alert("Error JSON: " + e.message); }
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-10">
+    <div className="max-w-5xl mx-auto space-y-6 pb-10">
       
       {/* HEADER */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <h2 className="text-3xl font-black text-slate-900">Configuración</h2>
-            <p className="text-slate-500">Ajustes generales del sistema</p>
+            <p className="text-slate-500">Ajustes generales del sistema local</p>
           </div>
           <button 
             onClick={handleSave}
@@ -188,79 +88,10 @@ const Configuration: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
-          {/* LEFT COLUMN: GENERAL SETTINGS */}
+          {/* LEFT COLUMN */}
           <div className="lg:col-span-2 space-y-6">
               
-              {/* 1. CLOUD SYNC SECTION (COMPACT) */}
-              {user?.role === UserRole.ADMIN && (
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                    <div 
-                        className={`p-4 flex justify-between items-center cursor-pointer transition-colors ${isConnected ? 'bg-emerald-50' : 'bg-slate-50'}`}
-                        onClick={() => setIsLinkingExpanded(!isLinkingExpanded)}
-                    >
-                        <div className="flex items-center">
-                            <Cloud className={`mr-3 ${isConnected ? 'text-emerald-600' : 'text-slate-400'}`} />
-                            <div>
-                                <h3 className={`font-bold text-sm ${isConnected ? 'text-emerald-800' : 'text-slate-600'}`}>
-                                    {isConnected ? 'Sistema en Nube Activo' : 'Sistema Local (Sin Conexión)'}
-                                </h3>
-                                {isConnected && <p className="text-[10px] text-emerald-600 font-mono">{config.firebaseConfig?.projectId}</p>}
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                             {isConnected && (
-                                 <button onClick={(e) => { e.stopPropagation(); navigate('/usuarios'); }} className="text-xs bg-white border border-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg font-bold flex items-center hover:bg-emerald-100">
-                                     <Users size={14} className="mr-1"/> Usuarios Vinculados
-                                 </button>
-                             )}
-                             {isLinkingExpanded ? <ChevronUp className="text-slate-400"/> : <ChevronDown className="text-slate-400"/>}
-                        </div>
-                    </div>
-                    
-                    {/* EXPANDABLE SECTION FOR LINKING/QR */}
-                    {isLinkingExpanded && (
-                        <div className="p-4 border-t border-slate-100 bg-white animate-fade-in">
-                            {isConnected ? (
-                                <div className="space-y-4">
-                                    <div className="flex items-center justify-between bg-slate-50 p-3 rounded-lg border border-slate-100">
-                                        <div className="text-xs text-slate-500">
-                                            Utiliza este código para conectar otros dispositivos (celulares, tablets) a esta misma base de datos.
-                                        </div>
-                                        <button 
-                                            onClick={generateConnectionData}
-                                            className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 shadow-md flex items-center text-xs ml-4 whitespace-nowrap"
-                                        >
-                                            <QrCode size={14} className="mr-2"/> MOSTRAR QR
-                                        </button>
-                                    </div>
-                                    
-                                    <div className="mt-2 pt-2 border-t border-slate-100">
-                                        <p className="text-[10px] uppercase font-bold text-slate-400 mb-2">Vincular usando código de texto</p>
-                                        <div className="flex gap-2">
-                                            <input 
-                                                value={importTokenInput}
-                                                onChange={e => setImportTokenInput(e.target.value)}
-                                                placeholder="Pegar código de otro equipo aquí..."
-                                                className="flex-1 border border-slate-300 rounded px-3 py-2 text-xs font-mono focus:border-blue-500 outline-none"
-                                            />
-                                            <button onClick={() => processImportToken(importTokenInput)} className="bg-slate-800 text-white px-3 py-2 rounded font-bold text-xs hover:bg-slate-700">
-                                                VINCULAR
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="text-center py-4">
-                                    <p className="text-sm text-slate-500 mb-2">Para vincular dispositivos, primero debes conectar la Nube.</p>
-                                    <p className="text-xs text-slate-400">Usa el botón de la nube en la barra superior derecha.</p>
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-              )}
-
-              {/* 2. GENERAL INFO */}
+              {/* 1. GENERAL INFO */}
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
                 <h3 className="font-bold text-base text-slate-800 border-b pb-2 flex items-center"><Building2 size={18} className="mr-2 text-slate-400"/> Datos de la Empresa</h3>
                 
@@ -290,7 +121,7 @@ const Configuration: React.FC = () => {
                 </div>
               </div>
 
-               {/* 3. HARDWARE & PERIPHERALS (NEW SECTION) */}
+               {/* 2. HARDWARE & PERIPHERALS */}
                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
                 <h3 className="font-bold text-base text-slate-800 border-b pb-2 flex items-center"><Settings size={18} className="mr-2 text-slate-400"/> Hardware y Periféricos</h3>
                 
@@ -374,36 +205,6 @@ const Configuration: React.FC = () => {
               </div>
           </div>
       </div>
-
-      {/* QR CODE MODAL */}
-      {showQR && (
-          <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-              <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center shadow-2xl relative">
-                  <button onClick={() => setShowQR(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><X/></button>
-                  
-                  <h3 className="text-xl font-black text-slate-900 mb-1">Vincular Dispositivo</h3>
-                  <p className="text-slate-500 text-sm mb-6">Escanea o copia el código en el nuevo equipo</p>
-                  
-                  <div className="bg-white p-4 rounded-xl border-2 border-slate-100 inline-block mb-6 shadow-inner">
-                      <img 
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(connectionToken)}`} 
-                        alt="QR Code" 
-                        className="w-48 h-48 object-contain"
-                      />
-                  </div>
-
-                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 mb-4">
-                      <p className="text-[10px] text-slate-400 uppercase font-bold mb-1 text-left">Token de Texto (Copiar todo)</p>
-                      <div className="flex gap-2">
-                          <input readOnly value={connectionToken} className="flex-1 bg-white border border-slate-200 rounded px-2 py-1 text-xs font-mono text-slate-600 truncate" />
-                          <button onClick={copyToClipboard} className="bg-blue-100 text-blue-600 p-1.5 rounded hover:bg-blue-200"><Copy size={16}/></button>
-                      </div>
-                  </div>
-
-                  <button onClick={() => setShowQR(false)} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold">Listo, Cerrar</button>
-              </div>
-          </div>
-      )}
     </div>
   );
 };

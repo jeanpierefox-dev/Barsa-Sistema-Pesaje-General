@@ -1,14 +1,13 @@
 import React, { useState, useContext, useEffect } from 'react';
 import { AuthContext } from '../../App';
 import { User, UserRole, WeighingType } from '../../types';
-import { getUsers, saveUser, deleteUser, isFirebaseConfigured } from '../../services/storage';
-import { Trash2, Plus, Shield, Edit, CheckSquare, Square, Cloud, CloudOff, User as UserIcon } from 'lucide-react';
+import { getUsers, saveUser, deleteUser } from '../../services/storage';
+import { Trash2, Plus, Shield, Edit, User as UserIcon, Database } from 'lucide-react';
 
 const UserManagement: React.FC = () => {
   const { user: currentUser } = useContext(AuthContext);
   const [users, setUsers] = useState<User[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isCloudActive, setIsCloudActive] = useState(false);
   
   // Form State
   const [newUser, setNewUser] = useState<Partial<User>>({ 
@@ -18,7 +17,6 @@ const UserManagement: React.FC = () => {
 
   useEffect(() => {
     refreshUsers();
-    setIsCloudActive(isFirebaseConfigured());
   }, [currentUser]);
 
   const refreshUsers = () => {
@@ -73,10 +71,10 @@ const UserManagement: React.FC = () => {
     <div className="space-y-6 max-w-5xl mx-auto">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-            <h2 className="text-2xl font-black text-gray-900">Usuarios Vinculados</h2>
+            <h2 className="text-2xl font-black text-gray-900">Usuarios del Sistema</h2>
             <p className="text-gray-500 text-sm flex items-center">
-                {isCloudActive ? <Cloud size={14} className="text-emerald-500 mr-1"/> : <CloudOff size={14} className="text-slate-400 mr-1"/>}
-                {isCloudActive ? 'Sincronizados en la Nube' : 'Almacenamiento Local'} • {users.length} Usuarios Activos
+                <Database size={14} className="text-slate-400 mr-1"/>
+                Almacenamiento Local • {users.length} Usuarios Activos
             </p>
         </div>
         <button 
@@ -106,11 +104,6 @@ const UserManagement: React.FC = () => {
               <div>
                 <p className="font-bold text-gray-900 text-lg leading-tight">{u.name}</p>
                 <p className="text-sm text-gray-500 font-mono">@{u.username}</p>
-                {isCloudActive && (
-                    <div className="flex items-center mt-1 text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-full w-fit">
-                        <Cloud size={10} className="mr-1"/> Vinculado
-                    </div>
-                )}
               </div>
             </div>
             
