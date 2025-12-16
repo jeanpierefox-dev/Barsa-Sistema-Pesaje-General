@@ -1,7 +1,7 @@
 import React, { useState, useContext, useEffect } from 'react';
 import { AppConfig, UserRole } from '../../types';
 import { getConfig, saveConfig, resetApp, isFirebaseConfigured, restoreBackup } from '../../services/storage';
-import { Printer, Save, Check, AlertTriangle, Bluetooth, Link2, MonitorCheck, Database, Cloud, CloudOff, Download, Upload, HardDriveDownload, HardDriveUpload, Smartphone, Share2, Key, Globe, LayoutGrid, Code, Server, QrCode, Copy, X } from 'lucide-react';
+import { Printer, Save, Check, AlertTriangle, Bluetooth, Link2, MonitorCheck, Database, Cloud, CloudOff, Download, Upload, HardDriveDownload, HardDriveUpload, Smartphone, Share2, Key, Globe, LayoutGrid, Code, Server, QrCode, Copy, X, ArrowDownCircle } from 'lucide-react';
 import { AuthContext } from '../../App';
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -108,7 +108,10 @@ const Configuration: React.FC = () => {
           const parsed = JSON.parse(jsonStr);
           
           if (parsed.apiKey && parsed.projectId) {
-              if (confirm("🔗 CONFIGURACIÓN DE NUBE DETECTADA\n\n¿Desea vincular este dispositivo ahora?")) {
+              const hasDbUrl = !!parsed.databaseURL;
+              const msg = `🔗 DATOS DE NUBE DETECTADOS\n\nProyecto: ${parsed.projectId}\nBase de Datos: ${hasDbUrl ? 'Configurada ✅' : 'No especificada'}\n\n¿Desea vincular este dispositivo ahora?`;
+              
+              if (confirm(msg)) {
                   const newConfig = { ...config, firebaseConfig: parsed };
                   setConfig(newConfig);
                   saveConfig(newConfig);
@@ -222,26 +225,35 @@ const Configuration: React.FC = () => {
                     <div className="p-6">
                         {!isConnected ? (
                             <div className="space-y-6">
-                                <div className="bg-blue-50 border border-blue-100 p-6 rounded-xl text-center">
-                                    <Smartphone className="mx-auto text-blue-500 mb-3" size={48} />
-                                    <h4 className="text-xl font-black text-blue-900 mb-2">Vincular Nuevo Dispositivo</h4>
-                                    <p className="text-sm text-blue-700 mb-6 max-w-sm mx-auto">
-                                        Si ya tienes el sistema configurado en otro equipo, genera un código de vinculación allá y pégalo aquí.
-                                    </p>
-                                    
-                                    <div className="flex gap-2">
-                                        <input 
-                                            value={importTokenInput}
-                                            onChange={e => setImportTokenInput(e.target.value)}
-                                            placeholder="Pegar Código de Vinculación aquí..."
-                                            className="flex-1 border-2 border-blue-200 rounded-lg px-4 py-2 font-mono text-sm focus:border-blue-500 outline-none"
-                                        />
-                                        <button 
-                                            onClick={() => processImportToken(importTokenInput)}
-                                            className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 shadow-md"
-                                        >
-                                            VINCULAR
-                                        </button>
+                                {/* INPUT AREA HIGHLIGHTED */}
+                                <div className="bg-blue-50 border-2 border-blue-200 p-6 rounded-xl text-center shadow-md relative overflow-hidden group">
+                                    <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
+                                        <QrCode size={100} className="text-blue-900" />
+                                    </div>
+
+                                    <div className="relative z-10">
+                                        <div className="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-600">
+                                            <ArrowDownCircle size={32} />
+                                        </div>
+                                        <h4 className="text-xl font-black text-blue-900 mb-2">¿Tienes un código de otro equipo?</h4>
+                                        <p className="text-sm text-blue-700 mb-6 max-w-sm mx-auto font-medium">
+                                            Pega aquí el código largo generado en el dispositivo principal para sincronizar todo automáticamente.
+                                        </p>
+                                        
+                                        <div className="flex flex-col gap-3">
+                                            <input 
+                                                value={importTokenInput}
+                                                onChange={e => setImportTokenInput(e.target.value)}
+                                                placeholder="PEGA EL CÓDIGO DE VINCULACIÓN AQUÍ..."
+                                                className="w-full border-2 border-blue-300 bg-white rounded-lg px-4 py-3 font-mono text-sm focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none text-center font-bold text-blue-900 placeholder-blue-300"
+                                            />
+                                            <button 
+                                                onClick={() => processImportToken(importTokenInput)}
+                                                className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg font-black hover:bg-blue-700 shadow-lg transform active:scale-95 transition-all flex items-center justify-center text-sm"
+                                            >
+                                                <Cloud className="mr-2" size={18}/> VINCULAR AHORA
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                                 
@@ -252,7 +264,7 @@ const Configuration: React.FC = () => {
                                 </div>
 
                                 {/* Manual Form Updated for Specific Fields */}
-                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 grid grid-cols-1 gap-4">
+                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 grid grid-cols-1 gap-4 opacity-80 hover:opacity-100 transition-opacity">
                                     <p className="text-xs text-slate-400 font-bold col-span-1">Credenciales de Proyecto Firebase</p>
                                     
                                     <div>
