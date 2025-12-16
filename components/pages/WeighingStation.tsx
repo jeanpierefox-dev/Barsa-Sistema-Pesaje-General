@@ -19,7 +19,7 @@ const WeighingStation: React.FC = () => {
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [newClientName, setNewClientName] = useState('');
   const [targetCrates, setTargetCrates] = useState(0); 
-  const [chickensPerCrate, setChickensPerCrate] = useState(10); 
+  const [chickensPerCrate, setChickensPerCrate] = useState(9); 
 
   // Weighing Inputs
   const [weightInput, setWeightInput] = useState('');
@@ -177,7 +177,8 @@ const WeighingStation: React.FC = () => {
     } else if (mode === WeighingType.SOLO_JABAS) {
         estimatedChickens = fullCratesCount * chickensPerCrate;
     } else {
-        estimatedChickens = fullCratesCount * 10; 
+        // CHANGED: Default calculation is now 9 chickens per crate as requested
+        estimatedChickens = fullCratesCount * 9; 
     }
 
     const netWeight = totalFullWeight - totalEmptyWeight - totalMortWeight;
@@ -232,7 +233,8 @@ const WeighingStation: React.FC = () => {
   const printTicket = (isPreview: boolean = false) => {
     if (!activeOrder) return;
     const totals = getTotals(activeOrder);
-    const currentPrice = isPreview ? pricePerKg : activeOrder.pricePerKg;
+    
+    const currentPrice = isPreview || activeOrder.pricePerKg === 0 ? pricePerKg : activeOrder.pricePerKg;
     const totalPay = (mode === WeighingType.SOLO_POLLO ? totals.totalFullWeight : totals.netWeight) * currentPrice;
 
     const doc = new jsPDF({ unit: 'mm', format: [80, 200] });
@@ -301,6 +303,7 @@ const WeighingStation: React.FC = () => {
     doc.text("PESO NETO:", 2, y);
     doc.text(`${totals.netWeight.toFixed(2)} kg`, 78, y, { align: 'right' });
     y += 6;
+    
     doc.text(`PRECIO/KG: S/. ${currentPrice.toFixed(2)}`, 2, y);
     y += 8;
     
@@ -312,10 +315,17 @@ const WeighingStation: React.FC = () => {
     doc.text(totalPay.toFixed(2), 76, y, { align: 'right' });
     y += 10;
 
-    if (activeOrder.paymentStatus === 'PAID' || payType === 'CASH') {
+    // CHANGED: Logic to show Payment Status correctly on ticket
+    // If it's PAID (Cash or Completed Credit), show CANCELADO
+    // If it's CREDIT (and not paid), show CREDITO
+    if (activeOrder.paymentStatus === 'PAID') {
          doc.setFontSize(16);
          doc.setTextColor(150);
          doc.text("CANCELADO", 40, y+10, { align: 'center' });
+    } else if (payType === 'CREDIT' && activeOrder.paymentStatus === 'PENDING') {
+         doc.setFontSize(16);
+         doc.setTextColor(150);
+         doc.text("CRÉDITO", 40, y+10, { align: 'center' });
     }
 
     doc.autoPrint();
@@ -328,19 +338,42 @@ const WeighingStation: React.FC = () => {
     const weightToPay = mode === WeighingType.SOLO_POLLO ? totals.totalFullWeight : totals.netWeight;
     const totalCost = weightToPay * pricePerKg; 
 
-    const payment: Payment = {
-        id: Date.now().toString(),
-        amount: parseFloat(payAmount) || totalCost,
-        timestamp: Date.now(),
-        note: payType
-    };
+    // LOGIC FIX FOR CREDIT:
+    // If CASH: Default amount is totalCost.
+    // If CREDIT: Default amount is 0 (User must type if they want to pay partial).
+    let amountToRecord = 0;
+    
+    if (payAmount !== '') {
+        amountToRecord = parseFloat(payAmount);
+    } else {
+        // If empty, auto-fill based on type
+        amountToRecord = payType === 'CASH' ? totalCost : 0;
+    }
 
-    const updatedOrder = { 
+    const newPayments = [...activeOrder.payments];
+    
+    // Only add a payment record if there is actual money moving
+    if (amountToRecord > 0) {
+        newPayments.push({
+            id: Date.now().toString(),
+            amount: amountToRecord,
+            timestamp: Date.now(),
+            note: payType === 'CASH' ? 'Pago Contado' : 'Abono Inicial Crédito'
+        });
+    }
+
+    // Determine status. If Full Paid -> PAID. Else -> PENDING.
+    // Note: Floating point comparison tolerance
+    const totalPaidSoFar = newPayments.reduce((acc, p) => acc + p.amount, 0);
+    const isFullyPaid = (totalCost - totalPaidSoFar) <= 0.1;
+
+    const updatedOrder: ClientOrder = { 
         ...activeOrder, 
         pricePerKg: pricePerKg,
-        payments: [...activeOrder.payments, payment],
-        paymentStatus: payType === 'CASH' ? 'PAID' : 'PENDING',
-        status: 'CLOSED' // Force close on confirm payment to block card
+        payments: newPayments,
+        paymentStatus: isFullyPaid ? 'PAID' : 'PENDING',
+        paymentMethod: payType, // Save the intention
+        status: 'CLOSED' 
     };
     
     saveOrder(updatedOrder);
@@ -368,12 +401,10 @@ const WeighingStation: React.FC = () => {
     const secondaryColor = [241, 245, 249]; // Slate 100
     
     // --- HEADER ---
-    // Logo
     if (logo) {
         try { doc.addImage(logo, 'PNG', 14, 10, 20, 20); } catch (e) {}
     }
     
-    // Company Title
     doc.setFont("helvetica", "bold");
     doc.setFontSize(18);
     doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
@@ -397,7 +428,7 @@ const WeighingStation: React.FC = () => {
         ]
     });
 
-    // --- EXECUTIVE SUMMARY (The "Corporate" Box) ---
+    // --- EXECUTIVE SUMMARY ---
     autoTable(doc, {
         startY: (doc as any).lastAutoTable.finalY + 5,
         theme: 'grid',
@@ -412,9 +443,7 @@ const WeighingStation: React.FC = () => {
             ['JABAS LLENAS (Bruto)', totals.fullCratesCount, totals.totalFullWeight.toFixed(2)],
             ['JABAS VACÍAS (Tara)', totals.emptyCratesCount, totals.totalEmptyWeight.toFixed(2)],
             ['MERMA / MORTALIDAD', totals.mortCount, totals.totalMortWeight.toFixed(2)],
-            // Empty row for spacing
             [{ content: '', colSpan: 3, styles: { cellPadding: 1, fillColor: [255, 255, 255] } }],
-            // Net Totals
             [
                 { content: 'PESO NETO TOTAL', styles: { fontSize: 12, textColor: primaryColor, fillColor: secondaryColor } },
                 { content: totals.estimatedChickens > 0 ? `${totals.estimatedChickens} Aves (Est.)` : '-', styles: { halign: 'center', fontSize: 10, fillColor: secondaryColor } },
@@ -431,14 +460,12 @@ const WeighingStation: React.FC = () => {
     doc.text("DETALLE DE MOVIMIENTOS", 14, summaryY);
     
     // --- DETAIL TABLES ---
-    // Helper to sort and map
     const getTableData = (type: 'FULL' | 'EMPTY' | 'MORTALITY') => {
         return activeOrder.records
             .filter(r => r.type === type)
             .sort((a,b) => a.timestamp - b.timestamp)
             .map((r, i) => [
                 (i + 1).toString(),
-                new Date(r.timestamp).toLocaleTimeString(),
                 r.quantity,
                 r.weight.toFixed(2)
             ]);
@@ -446,58 +473,82 @@ const WeighingStation: React.FC = () => {
 
     const fullData = getTableData('FULL');
     const emptyData = getTableData('EMPTY');
+    const mortData = getTableData('MORTALITY');
     
     let currentY = summaryY + 5;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 14;
+    const gutter = 10;
+    const tableWidth = (pageWidth - (margin * 2) - gutter) / 2;
 
-    // Table: Jabas Llenas
+    // Table: Jabas Llenas (Left Side)
     if (fullData.length > 0) {
         autoTable(doc, {
             startY: currentY,
-            head: [['#', 'Hora', 'Jabas', 'Peso (kg)']],
+            head: [['#', 'Llenas', 'Peso (kg)']],
             body: fullData,
             theme: 'striped',
-            headStyles: { fillColor: [30, 58, 138] }, // Dark Blue
-            styles: { fontSize: 9 },
-            columnStyles: { 3: { halign: 'right', fontStyle: 'bold' }, 2: { halign: 'center' } },
-            margin: { right: 110 } // Use half page
+            headStyles: { fillColor: [30, 58, 138], halign: 'center' }, // Dark Blue
+            styles: { fontSize: 8, halign: 'center' },
+            columnStyles: { 2: { halign: 'right', fontStyle: 'bold' } },
+            margin: { left: margin },
+            tableWidth: tableWidth
         });
     }
 
-    // Table: Jabas Vacias (Right side)
+    // Table: Jabas Vacias (Right Side)
+    // We check if FullData table exists to align top, otherwise use currentY
+    const finalYFull = (doc as any).lastAutoTable.finalY || currentY;
+    
     if (emptyData.length > 0) {
         autoTable(doc, {
             startY: currentY,
-            head: [['#', 'Hora', 'Jabas', 'Peso (kg)']],
+            head: [['#', 'Vacías', 'Peso (kg)']],
             body: emptyData,
             theme: 'striped',
-            headStyles: { fillColor: [194, 65, 12] }, // Orange
-            styles: { fontSize: 9 },
-            columnStyles: { 3: { halign: 'right', fontStyle: 'bold' }, 2: { halign: 'center' } },
-            margin: { left: 110 } // Use other half
-        });
-    }
-    
-    // Mortality Table (Bottom, full width if needed)
-    const mortData = getTableData('MORTALITY');
-    if (mortData.length > 0) {
-        autoTable(doc, {
-            startY: (doc as any).lastAutoTable.finalY + 10,
-            head: [['#', 'Hora', 'Cantidad Aves', 'Peso (kg)']],
-            body: mortData,
-            theme: 'striped',
-            headStyles: { fillColor: [185, 28, 28] }, // Red
-            styles: { fontSize: 9 },
-            columnStyles: { 3: { halign: 'right', fontStyle: 'bold' }, 2: { halign: 'center' } }
+            headStyles: { fillColor: [194, 65, 12], halign: 'center' }, // Orange
+            styles: { fontSize: 8, halign: 'center' },
+            columnStyles: { 2: { halign: 'right', fontStyle: 'bold' } },
+            margin: { left: margin + tableWidth + gutter },
+            tableWidth: tableWidth
         });
     }
 
-    // Footer
+    const finalYEmpty = (doc as any).lastAutoTable.finalY || currentY;
+    
+    // Mortality Table (Bottom, full width)
+    if (mortData.length > 0) {
+        const nextY = Math.max(finalYFull, finalYEmpty) + 10;
+        
+        // Check if page break needed
+        if (nextY > 250) {
+             doc.addPage();
+             currentY = 20;
+        } else {
+             currentY = nextY;
+        }
+
+        doc.setFontSize(10);
+        doc.setTextColor(185, 28, 28);
+        doc.text("Registro de Merma / Mortalidad", 14, currentY - 2);
+
+        autoTable(doc, {
+            startY: currentY,
+            head: [['#', 'Cantidad Aves', 'Peso (kg)']],
+            body: mortData,
+            theme: 'striped',
+            headStyles: { fillColor: [185, 28, 28], halign: 'center' }, // Red
+            styles: { fontSize: 9, halign: 'center' },
+            columnStyles: { 2: { halign: 'right', fontStyle: 'bold' } }
+        });
+    }
+
     const pageCount = (doc as any).internal.getNumberOfPages();
     for(let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
         doc.setFontSize(8);
         doc.setTextColor(150);
-        doc.text(`Generado por AviControl Pro - ${new Date().toLocaleString()}`, 10, 285);
+        doc.text(`Generado por Sistema Barsa - ${new Date().toLocaleString()}`, 10, 285);
         doc.text(`Página ${i} de ${pageCount}`, 190, 285, { align: 'right' });
     }
 
@@ -606,18 +657,18 @@ const WeighingStation: React.FC = () => {
         {/* Header with Return to Batch */}
         <div className="flex items-center justify-between mb-8 pb-4 border-b border-gray-200">
             <div>
-                <h2 className="text-3xl font-black text-blue-950 tracking-tight">{title}</h2>
-                {batchInfo && <p className="text-lg text-blue-700 font-bold">{batchInfo.name}</p>}
-                <p className="text-slate-500 text-sm mt-1">Seleccione un cliente para iniciar el pesaje</p>
+                <h2 className="text-xl md:text-3xl font-black text-blue-950 tracking-tight">{title}</h2>
+                {batchInfo && <p className="text-sm md:text-lg text-blue-700 font-bold">{batchInfo.name}</p>}
+                <p className="text-slate-500 text-xs md:text-sm mt-1">Seleccione un cliente para iniciar el pesaje</p>
             </div>
-            <div className="flex gap-3">
+            <div className="flex gap-2 md:gap-3">
                  {batchId && (
-                     <button onClick={() => navigate('/lotes')} className="bg-blue-50 border border-blue-200 text-blue-800 px-5 py-3 rounded-xl flex items-center font-bold shadow-sm hover:bg-blue-100 transition-colors">
-                        <RotateCcw size={18} className="mr-2"/> Regresar al Lote
+                     <button onClick={() => navigate('/lotes')} className="bg-blue-50 border border-blue-200 text-blue-800 px-3 md:px-5 py-2 md:py-3 rounded-xl flex items-center font-bold shadow-sm hover:bg-blue-100 transition-colors text-xs md:text-base">
+                        <RotateCcw size={16} className="mr-1 md:mr-2"/> Regresar
                      </button>
                  )}
-                 <button onClick={() => navigate('/')} className="bg-white border border-gray-300 text-slate-700 px-5 py-3 rounded-xl flex items-center font-bold shadow-sm hover:bg-gray-50 transition-colors">
-                      <Home size={18} className="mr-2"/> Menú Principal
+                 <button onClick={() => navigate('/')} className="bg-white border border-gray-300 text-slate-700 px-3 md:px-5 py-2 md:py-3 rounded-xl flex items-center font-bold shadow-sm hover:bg-gray-50 transition-colors text-xs md:text-base">
+                      <Home size={16} className="mr-1 md:mr-2"/> Menú
                  </button>
             </div>
         </div>
@@ -625,7 +676,7 @@ const WeighingStation: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           <button 
             onClick={() => setShowClientModal(true)}
-            className="flex flex-col items-center justify-center h-full min-h-[220px] bg-slate-50 border-2 border-dashed border-slate-300 rounded-2xl hover:bg-white hover:border-blue-600 hover:shadow-xl transition-all group"
+            className="flex flex-col items-center justify-center h-full min-h-[200px] bg-slate-50 border-2 border-dashed border-slate-300 rounded-2xl hover:bg-white hover:border-blue-600 hover:shadow-xl transition-all group"
           >
             <div className="bg-white p-4 rounded-full shadow-sm mb-3 group-hover:scale-110 transition-transform text-blue-600">
                 <Plus size={32} />
@@ -680,7 +731,8 @@ const WeighingStation: React.FC = () => {
                           </div>
                           <div className="bg-emerald-50 p-2 rounded-xl border border-emerald-100">
                               <p className="text-[9px] font-bold text-emerald-600 uppercase">Neto</p>
-                              <p className="font-black text-slate-800 text-xl">{totals.netWeight.toFixed(0)}</p>
+                              {/* CHANGED: 2 decimals for net weight in card */}
+                              <p className="font-black text-slate-800 text-xl">{totals.netWeight.toFixed(2)}</p>
                           </div>
                       </div>
                       
@@ -749,20 +801,20 @@ const WeighingStation: React.FC = () => {
   // WEIGHING UI
   return (
     <div className="h-full flex flex-col space-y-4 max-w-7xl mx-auto">
-      {/* 1. Header Info (COMPACT DIGITAL NAVY) */}
-      <div className="bg-blue-950 p-3 rounded-2xl shadow-lg border border-blue-900 text-white flex flex-col lg:flex-row justify-between items-center gap-4 relative overflow-hidden">
+      {/* 1. Header Info (COMPACT DIGITAL NAVY - RESPONSIVE) */}
+      <div className="bg-blue-950 p-2 md:p-3 rounded-2xl shadow-lg border border-blue-900 text-white flex flex-col lg:flex-row justify-between items-center gap-3 relative overflow-hidden">
           
           <div className="flex items-center z-10 w-full lg:w-auto">
              <button onClick={() => setActiveOrder(null)} className="p-2 bg-blue-900 rounded-xl mr-3 hover:bg-blue-800 transition-colors border border-blue-800 shadow-sm">
                  <ArrowLeft size={20} className="text-white" />
              </button>
              <div>
-                 <h1 className="text-lg font-black text-white tracking-tight leading-none flex items-center">
+                 <h1 className="text-base md:text-lg font-black text-white tracking-tight leading-none flex items-center">
                     {activeOrder?.clientName} 
                     {isLocked && <Lock size={16} className="ml-2 text-yellow-400"/>}
                     {(isFullLimitReached || isEmptyLimitReached) && !isLocked && <CheckCircle size={16} className="ml-2 text-emerald-400" />}
                  </h1>
-                 <div className="flex items-center space-x-2 mt-1 text-xs font-mono text-blue-200 opacity-80">
+                 <div className="flex items-center space-x-2 mt-1 text-[10px] md:text-xs font-mono text-blue-200 opacity-80">
                      <span>{mode === WeighingType.SOLO_POLLO ? 'SOLO POLLO' : mode === WeighingType.SOLO_JABAS ? 'SOLO JABAS' : 'LOTE'}</span>
                      <span>|</span>
                      <span>LIMITE: <span className={`${isFullLimitReached ? 'text-emerald-400' : 'text-white'} font-bold`}>{activeOrder?.targetCrates > 0 ? activeOrder.targetCrates : '∞'}</span></span>
@@ -772,21 +824,21 @@ const WeighingStation: React.FC = () => {
           
           <div className="flex-1 w-full flex justify-center z-10">
               <div className="grid grid-cols-4 gap-2 w-full max-w-3xl">
-                  <div className="bg-blue-900/50 px-3 py-1.5 rounded-lg border border-blue-800 text-center backdrop-blur-sm">
-                      <p className="text-[9px] text-blue-300 uppercase font-bold tracking-widest">Jabas</p>
-                      <p className="font-mono text-xl font-bold text-yellow-400 leading-none">{totals.fullCratesCount}</p>
+                  <div className="bg-blue-900/50 px-2 py-1.5 rounded-lg border border-blue-800 text-center backdrop-blur-sm">
+                      <p className="text-[8px] md:text-[9px] text-blue-300 uppercase font-bold tracking-widest">Jabas</p>
+                      <p className="font-mono text-sm md:text-xl font-bold text-yellow-400 leading-none">{totals.fullCratesCount}</p>
                   </div>
-                  <div className="bg-blue-900/50 px-3 py-1.5 rounded-lg border border-blue-800 text-center backdrop-blur-sm">
-                      <p className="text-[9px] text-blue-300 uppercase font-bold tracking-widest">Bruto</p>
-                      <p className="font-mono text-xl font-bold text-blue-300 leading-none">{totals.totalFullWeight.toFixed(1)}</p>
+                  <div className="bg-blue-900/50 px-2 py-1.5 rounded-lg border border-blue-800 text-center backdrop-blur-sm">
+                      <p className="text-[8px] md:text-[9px] text-blue-300 uppercase font-bold tracking-widest">Bruto</p>
+                      <p className="font-mono text-sm md:text-xl font-bold text-blue-300 leading-none">{totals.totalFullWeight.toFixed(1)}</p>
                   </div>
-                  <div className="bg-blue-900/50 px-3 py-1.5 rounded-lg border border-blue-800 text-center backdrop-blur-sm">
-                      <p className="text-[9px] text-blue-300 uppercase font-bold tracking-widest">Prom.</p>
-                      <p className="font-mono text-xl font-bold text-purple-300 leading-none">{totals.avgWeight.toFixed(2)}</p>
+                  <div className="bg-blue-900/50 px-2 py-1.5 rounded-lg border border-blue-800 text-center backdrop-blur-sm">
+                      <p className="text-[8px] md:text-[9px] text-blue-300 uppercase font-bold tracking-widest">Prom.</p>
+                      <p className="font-mono text-sm md:text-xl font-bold text-purple-300 leading-none">{totals.avgWeight.toFixed(2)}</p>
                   </div>
-                   <div className="bg-blue-900 px-3 py-1.5 rounded-lg border border-emerald-800 text-center shadow-inner shadow-black/20">
-                      <p className="text-[9px] text-emerald-400 uppercase font-bold tracking-widest">Neto</p>
-                      <p className="font-mono text-2xl font-bold text-emerald-400 leading-none">{totals.netWeight.toFixed(1)}</p>
+                   <div className="bg-blue-900 px-2 py-1.5 rounded-lg border border-emerald-800 text-center shadow-inner shadow-black/20">
+                      <p className="text-[8px] md:text-[9px] text-emerald-400 uppercase font-bold tracking-widest">Neto</p>
+                      <p className="font-mono text-lg md:text-2xl font-bold text-emerald-400 leading-none">{totals.netWeight.toFixed(1)}</p>
                   </div>
               </div>
           </div>
@@ -796,7 +848,7 @@ const WeighingStation: React.FC = () => {
                   <Eye size={20}/>
               </button>
               {/* Show COBRAR button even if locked to allow reprinting/viewing, just logic inside modal will restrict */}
-              <button onClick={() => { setPricePerKg(activeOrder?.pricePerKg || 0); setShowPaymentModal(true); }} className="flex-1 lg:flex-none bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-emerald-500 shadow-lg flex items-center justify-center transition-all text-sm">
+              <button onClick={() => { setPricePerKg(activeOrder?.pricePerKg || 0); setShowPaymentModal(true); }} className="flex-1 lg:flex-none bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-emerald-500 shadow-lg flex items-center justify-center transition-all text-xs md:text-sm">
                   <span className="mr-1">S/.</span> COBRAR
               </button>
           </div>
@@ -820,44 +872,44 @@ const WeighingStation: React.FC = () => {
                 {/* Type Tabs - Always visible to allow switching */}
                 {mode !== WeighingType.SOLO_POLLO && (
                     <div className="flex flex-col sm:flex-row bg-slate-100 p-1.5 rounded-xl gap-2 w-full lg:w-auto relative z-30">
-                        <button onClick={() => setActiveTab('FULL')} className={`px-4 py-3 rounded-lg font-bold text-sm transition-all flex-1 flex items-center justify-center gap-2 ${activeTab === 'FULL' ? 'bg-blue-800 text-white shadow-md' : 'text-slate-500 hover:bg-white'}`}>
-                            <Package size={18}/> LLENAS
+                        <button onClick={() => setActiveTab('FULL')} className={`px-2 py-3 md:px-4 rounded-lg font-bold text-xs md:text-sm transition-all flex-1 flex items-center justify-center gap-2 ${activeTab === 'FULL' ? 'bg-blue-800 text-white shadow-md' : 'text-slate-500 hover:bg-white'}`}>
+                            <Package size={16}/> LLENAS
                         </button>
-                        <button onClick={() => setActiveTab('EMPTY')} className={`px-4 py-3 rounded-lg font-bold text-sm transition-all flex-1 flex items-center justify-center gap-2 ${activeTab === 'EMPTY' ? 'bg-orange-700 text-white shadow-md' : 'text-slate-500 hover:bg-white'}`}>
-                            <PackageOpen size={18}/> VACÍAS
+                        <button onClick={() => setActiveTab('EMPTY')} className={`px-2 py-3 md:px-4 rounded-lg font-bold text-xs md:text-sm transition-all flex-1 flex items-center justify-center gap-2 ${activeTab === 'EMPTY' ? 'bg-orange-700 text-white shadow-md' : 'text-slate-500 hover:bg-white'}`}>
+                            <PackageOpen size={16}/> VACÍAS
                         </button>
-                        <button onClick={() => setActiveTab('MORTALITY')} className={`px-4 py-3 rounded-lg font-bold text-sm transition-all flex-1 flex items-center justify-center gap-2 ${activeTab === 'MORTALITY' ? 'bg-red-700 text-white shadow-md' : 'text-slate-500 hover:bg-white'}`}>
-                            <AlertOctagon size={18}/> MERMA
+                        <button onClick={() => setActiveTab('MORTALITY')} className={`px-2 py-3 md:px-4 rounded-lg font-bold text-xs md:text-sm transition-all flex-1 flex items-center justify-center gap-2 ${activeTab === 'MORTALITY' ? 'bg-red-700 text-white shadow-md' : 'text-slate-500 hover:bg-white'}`}>
+                            <AlertOctagon size={16}/> MERMA
                         </button>
                     </div>
                 )}
 
                 {/* Inputs */}
-                <div className="flex gap-3 flex-1 items-stretch">
-                    <div className="w-24 bg-slate-50 rounded-xl border-2 border-slate-200 p-1 flex flex-col justify-center">
-                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider text-center">Cant.</label>
+                <div className="flex gap-2 md:gap-3 flex-1 items-stretch">
+                    <div className="w-20 md:w-24 bg-slate-50 rounded-xl border-2 border-slate-200 p-1 flex flex-col justify-center">
+                        <label className="text-[8px] md:text-[9px] font-bold text-slate-400 uppercase tracking-wider text-center">Cant.</label>
                         <input 
                             type="number"
                             value={qtyInput}
                             onChange={e => setQtyInput(e.target.value)}
                             disabled={isTabBlocked}
-                            className="w-full bg-transparent text-slate-900 text-3xl font-black text-center outline-none disabled:text-gray-300"
+                            className="w-full bg-transparent text-slate-900 text-2xl md:text-3xl font-black text-center outline-none disabled:text-gray-300"
                         />
                     </div>
                     {mode === WeighingType.SOLO_JABAS && (
-                        <div className="w-24 bg-slate-50 rounded-xl border-2 border-slate-200 p-1 flex flex-col justify-center">
-                            <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider text-center">Pollos/J</label>
+                        <div className="w-20 md:w-24 bg-slate-50 rounded-xl border-2 border-slate-200 p-1 flex flex-col justify-center">
+                            <label className="text-[8px] md:text-[9px] font-bold text-slate-400 uppercase tracking-wider text-center">Pollos/J</label>
                             <input 
                                 type="number"
                                 value={chickensPerCrate}
                                 onChange={e => setChickensPerCrate(Number(e.target.value))}
                                 disabled={isTabBlocked}
-                                className="w-full bg-transparent text-slate-900 text-3xl font-black text-center outline-none disabled:text-gray-300"
+                                className="w-full bg-transparent text-slate-900 text-2xl md:text-3xl font-black text-center outline-none disabled:text-gray-300"
                             />
                         </div>
                     )}
                     <div className="flex-1 relative bg-slate-50 rounded-xl border-2 border-slate-200 p-1 flex flex-col justify-center group focus-within:border-blue-600 focus-within:ring-2 focus-within:ring-blue-100 transition-all">
-                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider text-center">Peso (KG)</label>
+                        <label className="text-[8px] md:text-[9px] font-bold text-slate-400 uppercase tracking-wider text-center">Peso (KG)</label>
                         <input 
                             ref={weightInputRef}
                             type="number"
@@ -865,15 +917,15 @@ const WeighingStation: React.FC = () => {
                             onChange={e => setWeightInput(e.target.value)}
                             onKeyDown={e => e.key === 'Enter' && !isTabBlocked && addWeight()}
                             disabled={isTabBlocked}
-                            className="w-full bg-transparent text-slate-900 text-4xl font-black text-center outline-none disabled:text-gray-300"
+                            className="w-full bg-transparent text-slate-900 text-3xl md:text-4xl font-black text-center outline-none disabled:text-gray-300"
                             placeholder="0.00"
                         />
-                        <button onClick={connectScale} disabled={isTabBlocked} className={`absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-full ${config.scaleConnected ? 'bg-emerald-100 text-emerald-600' : 'bg-gray-200 text-gray-400'}`}>
-                            <Bluetooth size={20}/>
+                        <button onClick={connectScale} disabled={isTabBlocked} className={`absolute right-1 md:right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-full ${config.scaleConnected ? 'bg-emerald-100 text-emerald-600' : 'bg-gray-200 text-gray-400'}`}>
+                            <Bluetooth size={16} className="md:w-5 md:h-5"/>
                         </button>
                     </div>
-                    <button onClick={addWeight} disabled={isTabBlocked} className={`w-20 rounded-xl shadow-lg flex items-center justify-center transition-all active:scale-95 ${isTabBlocked ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-blue-900 text-white hover:bg-blue-800 shadow-blue-200'}`}>
-                        <Save size={32} />
+                    <button onClick={addWeight} disabled={isTabBlocked} className={`w-16 md:w-20 rounded-xl shadow-lg flex items-center justify-center transition-all active:scale-95 ${isTabBlocked ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-blue-900 text-white hover:bg-blue-800 shadow-blue-200'}`}>
+                        <Save size={24} className="md:w-8 md:h-8" />
                     </button>
                 </div>
             </div>
@@ -886,9 +938,8 @@ const WeighingStation: React.FC = () => {
           </div>
       )}
 
-      {/* 3. Three Columns Layout */}
+      {/* 3. Three Columns Layout - INCREASED DELETE BUTTON VISIBILITY */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1 min-h-0 pb-2">
-          {/* Reuse previous logic but disabled Trash if Locked */}
           {mode === WeighingType.SOLO_POLLO ? (
               <div className="md:col-span-3 h-full">
                   <div className="bg-white rounded-xl shadow border border-slate-200 flex flex-col h-full overflow-hidden">
@@ -900,7 +951,11 @@ const WeighingStation: React.FC = () => {
                            <div key={r.id} className="flex justify-between items-center p-3 bg-white rounded-lg border border-slate-200 shadow-sm hover:border-amber-300 transition-colors">
                                <span className="font-mono font-bold text-slate-900 text-xl">{r.weight.toFixed(2)}</span>
                                <span className="text-slate-400 font-bold bg-slate-100 px-2 py-1 rounded text-xs">x{r.quantity}</span>
-                               {!isLocked && <button onClick={() => deleteRecord(r.id)} className="text-red-400 hover:text-red-600 bg-red-50 p-1.5 rounded-lg hover:bg-red-100 transition-colors"><Trash2 size={16} /></button>}
+                               {!isLocked && (
+                                   <button onClick={() => deleteRecord(r.id)} className="bg-red-100 text-red-600 hover:bg-red-600 hover:text-white p-2 rounded-lg transition-all shadow-sm flex items-center justify-center ml-4">
+                                       <Trash2 size={20} />
+                                   </button>
+                               )}
                            </div>
                         ))}
                      </div>
@@ -915,9 +970,15 @@ const WeighingStation: React.FC = () => {
                      <div className="flex-1 overflow-y-auto p-2 space-y-1 bg-slate-50">
                         {activeOrder.records.filter(r => r.type === 'FULL').map(r => (
                            <div key={r.id} className="flex justify-between items-center p-2 bg-white rounded-lg border border-slate-200 shadow-sm hover:border-blue-300 transition-colors">
-                               <span className="font-mono font-bold text-slate-900 text-lg">{r.weight.toFixed(2)}</span>
-                               <span className="text-slate-400 font-bold text-xs bg-slate-100 px-2 py-0.5 rounded">x{r.quantity}</span>
-                               {!isLocked && <button onClick={() => deleteRecord(r.id)} className="text-red-400 hover:text-red-600"><Trash2 size={14} /></button>}
+                               <div className="flex items-baseline gap-2">
+                                   <span className="font-mono font-bold text-slate-900 text-lg">{r.weight.toFixed(2)}</span>
+                                   <span className="text-slate-400 font-bold text-xs bg-slate-100 px-2 py-0.5 rounded">x{r.quantity}</span>
+                               </div>
+                               {!isLocked && (
+                                   <button onClick={() => deleteRecord(r.id)} className="bg-red-100 text-red-600 hover:bg-red-600 hover:text-white p-1.5 rounded-lg transition-all shadow-sm flex items-center justify-center">
+                                       <Trash2 size={16} />
+                                   </button>
+                               )}
                            </div>
                         ))}
                      </div>
@@ -929,9 +990,15 @@ const WeighingStation: React.FC = () => {
                      <div className="flex-1 overflow-y-auto p-2 space-y-1 bg-slate-50">
                         {activeOrder.records.filter(r => r.type === 'EMPTY').map(r => (
                            <div key={r.id} className="flex justify-between items-center p-2 bg-white rounded-lg border border-slate-200 shadow-sm hover:border-orange-300 transition-colors">
-                               <span className="font-mono font-bold text-slate-900 text-lg">{r.weight.toFixed(2)}</span>
-                               <span className="text-slate-400 font-bold text-xs bg-slate-100 px-2 py-0.5 rounded">x{r.quantity}</span>
-                               {!isLocked && <button onClick={() => deleteRecord(r.id)} className="text-red-400 hover:text-red-600"><Trash2 size={14} /></button>}
+                               <div className="flex items-baseline gap-2">
+                                   <span className="font-mono font-bold text-slate-900 text-lg">{r.weight.toFixed(2)}</span>
+                                   <span className="text-slate-400 font-bold text-xs bg-slate-100 px-2 py-0.5 rounded">x{r.quantity}</span>
+                               </div>
+                               {!isLocked && (
+                                   <button onClick={() => deleteRecord(r.id)} className="bg-red-100 text-red-600 hover:bg-red-600 hover:text-white p-1.5 rounded-lg transition-all shadow-sm flex items-center justify-center">
+                                       <Trash2 size={16} />
+                                   </button>
+                               )}
                            </div>
                         ))}
                      </div>
@@ -943,9 +1010,15 @@ const WeighingStation: React.FC = () => {
                      <div className="flex-1 overflow-y-auto p-2 space-y-1 bg-slate-50">
                         {activeOrder.records.filter(r => r.type === 'MORTALITY').map(r => (
                            <div key={r.id} className="flex justify-between items-center p-2 bg-white rounded-lg border border-slate-200 shadow-sm hover:border-red-300 transition-colors">
-                               <span className="font-mono font-bold text-slate-900 text-lg">{r.weight.toFixed(2)}</span>
-                               <span className="text-slate-400 font-bold text-xs bg-slate-100 px-2 py-0.5 rounded">x{r.quantity}</span>
-                               {!isLocked && <button onClick={() => deleteRecord(r.id)} className="text-red-400 hover:text-red-600"><Trash2 size={14} /></button>}
+                               <div className="flex items-baseline gap-2">
+                                   <span className="font-mono font-bold text-slate-900 text-lg">{r.weight.toFixed(2)}</span>
+                                   <span className="text-slate-400 font-bold text-xs bg-slate-100 px-2 py-0.5 rounded">x{r.quantity}</span>
+                               </div>
+                               {!isLocked && (
+                                   <button onClick={() => deleteRecord(r.id)} className="bg-red-50 text-red-400 hover:bg-red-500 hover:text-white p-1.5 rounded-lg transition-all shadow-sm flex items-center justify-center">
+                                       <Trash2 size={16} />
+                                   </button>
+                               )}
                            </div>
                         ))}
                      </div>
@@ -967,7 +1040,7 @@ const WeighingStation: React.FC = () => {
                 
                 <div className="flex flex-col md:flex-row gap-6 flex-1 min-h-0">
                     {/* LEFT: LARGE TICKET PREVIEW */}
-                    <div className="flex-1 bg-yellow-50 border-2 border-dashed border-yellow-200 p-6 rounded-xl overflow-y-auto font-mono text-slate-700 shadow-inner h-full flex flex-col">
+                    <div className="hidden md:flex flex-1 bg-yellow-50 border-2 border-dashed border-yellow-200 p-6 rounded-xl overflow-y-auto font-mono text-slate-700 shadow-inner h-full flex-col">
                          <div className="flex-1">
                             <div className="text-center font-bold text-lg mb-4">{config.companyName || 'AVICOLA'}</div>
                             <div className="flex justify-between mb-2 text-sm"><span>Fecha:</span> <span>{new Date().toLocaleDateString()}</span></div>

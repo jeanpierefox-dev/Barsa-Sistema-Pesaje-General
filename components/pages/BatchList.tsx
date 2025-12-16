@@ -109,17 +109,17 @@ const BatchList: React.FC = () => {
                       <div className="bg-blue-50 p-2 rounded-xl border border-blue-100">
                           <p className="text-[10px] font-bold text-blue-400 uppercase">Llenas</p>
                           <p className="font-black text-slate-800 text-lg leading-none">{totalFullCrates}</p>
-                          <p className="text-[10px] text-slate-500 font-bold mt-1">{totalFullWeight.toFixed(0)} kg</p>
+                          <p className="text-[10px] text-slate-500 font-bold mt-1">{totalFullWeight.toFixed(2)} kg</p>
                       </div>
                       <div className="bg-orange-50 p-2 rounded-xl border border-orange-100">
                           <p className="text-[10px] font-bold text-orange-400 uppercase">Vacías</p>
                           <p className="font-black text-slate-800 text-lg leading-none">{totalEmptyCrates}</p>
-                           <p className="text-[10px] text-slate-500 font-bold mt-1">{totalEmptyWeight.toFixed(0)} kg</p>
+                           <p className="text-[10px] text-slate-500 font-bold mt-1">{totalEmptyWeight.toFixed(2)} kg</p>
                       </div>
                       <div className="bg-red-50 p-2 rounded-xl border border-red-100">
                           <p className="text-[10px] font-bold text-red-400 uppercase">Merma</p>
                           <p className="font-black text-slate-800 text-lg leading-none">{totalMort}</p>
-                           <p className="text-[10px] text-slate-500 font-bold mt-1">{totalMortWeight.toFixed(0)} kg</p>
+                           <p className="text-[10px] text-slate-500 font-bold mt-1">{totalMortWeight.toFixed(2)} kg</p>
                       </div>
                   </div>
               </div>

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { getOrders, saveOrder, getConfig } from '../../services/storage';
 import { ClientOrder, WeighingType, UserRole } from '../../types';
-import { Search, Clock, History, Printer, Filter, CheckCircle } from 'lucide-react';
+import { Search, Clock, History, Printer, Filter, CheckCircle, FileText } from 'lucide-react';
 import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { AuthContext } from '../../App';
 
 const Collections: React.FC = () => {
@@ -110,6 +111,88 @@ const Collections: React.FC = () => {
     window.open(doc.output('bloburl'), '_blank');
   };
 
+  const generateAccountStatement = (order: ClientOrder) => {
+    const { totalDue, totalPaid, balance } = calculateBalance(order);
+    const doc = new jsPDF();
+    const company = config.companyName || 'SISTEMA BARSA';
+    const primaryColor = [23, 37, 84]; // Navy Blue
+
+    // Header Background
+    doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+    doc.rect(0, 0, 210, 40, 'F');
+
+    // Logo & Title
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(22);
+    doc.text("ESTADO DE CUENTA", 14, 25);
+    doc.setFontSize(12);
+    doc.text(company, 200, 25, { align: 'right' });
+
+    // Client Info Card
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Cliente: ${order.clientName}`, 14, 50);
+    doc.setFont("helvetica", "normal");
+    doc.text(`ID Transacción: #${order.id.slice(-8)}`, 14, 56);
+    doc.text(`Fecha Emisión: ${new Date().toLocaleDateString()}`, 14, 62);
+    
+    // Balance Big Number
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text("Saldo Pendiente:", 200, 50, { align: 'right' });
+    doc.setFontSize(20);
+    doc.setTextColor(220, 38, 38); // Red
+    doc.setFont("helvetica", "bold");
+    doc.text(`S/. ${balance.toFixed(2)}`, 200, 60, { align: 'right' });
+
+    // 1. Transaction Summary
+    autoTable(doc, {
+        startY: 70,
+        theme: 'grid',
+        headStyles: { fillColor: [241, 245, 249], textColor: 0, fontStyle: 'bold' },
+        body: [
+            ['Monto Total Venta (Deuda Inicial)', `S/. ${totalDue.toFixed(2)}`],
+            ['Total Pagado a la Fecha', `S/. ${totalPaid.toFixed(2)}`],
+        ],
+        columnStyles: { 1: { halign: 'right', fontStyle: 'bold' } }
+    });
+
+    doc.setFontSize(11);
+    doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+    doc.text("Historial de Abonos", 14, (doc as any).lastAutoTable.finalY + 15);
+
+    // 2. Payment History Table
+    const paymentRows = order.payments.map((p, i) => [
+        i + 1,
+        new Date(p.timestamp).toLocaleDateString() + ' ' + new Date(p.timestamp).toLocaleTimeString(),
+        p.note || '-',
+        `S/. ${p.amount.toFixed(2)}`
+    ]);
+
+    if (paymentRows.length === 0) {
+        paymentRows.push(['-', '-', 'Sin abonos registrados', 'S/. 0.00']);
+    }
+
+    autoTable(doc, {
+        startY: (doc as any).lastAutoTable.finalY + 20,
+        head: [['#', 'Fecha', 'Concepto', 'Monto']],
+        body: paymentRows,
+        theme: 'striped',
+        headStyles: { fillColor: primaryColor },
+        columnStyles: { 3: { halign: 'right', fontStyle: 'bold' } }
+    });
+
+    // Footer
+    const pageHeight = doc.internal.pageSize.getHeight();
+    doc.setFontSize(8);
+    doc.setTextColor(150);
+    doc.text("Este documento es un resumen de cuenta y no representa un comprobante fiscal.", 105, pageHeight - 10, { align: 'center' });
+
+    doc.save(`EstadoCuenta_${order.clientName}.pdf`);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-end md:items-center gap-4">
@@ -172,9 +255,16 @@ const Collections: React.FC = () => {
                     <td className="p-4 text-right font-black text-red-600">S/. {balance.toFixed(2)}</td>
                     <td className="p-4 text-center flex justify-center space-x-2">
                       <button 
+                         onClick={() => generateAccountStatement(order)}
+                         className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg border border-transparent hover:border-indigo-200 transition-all"
+                         title="Estado de Cuenta (PDF)"
+                      >
+                          <FileText size={18} />
+                      </button>
+                      <button 
                          onClick={() => setViewHistoryOrder(order)}
                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg border border-transparent hover:border-blue-200 transition-all"
-                         title="Historial"
+                         title="Historial de Pagos"
                       >
                           <History size={18} />
                       </button>

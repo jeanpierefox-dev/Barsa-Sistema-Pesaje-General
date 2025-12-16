@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useContext } from 'react';
 import { getBatches, getOrders, getConfig } from '../../services/storage';
 import { Batch, ClientOrder, WeighingType, UserRole } from '../../types';
-import { ChevronDown, ChevronUp, Package, ShoppingCart, List, Printer } from 'lucide-react';
+import { ChevronDown, ChevronUp, Package, ShoppingCart, List, Printer, AlertOctagon } from 'lucide-react';
 import { AuthContext } from '../../App';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -53,43 +53,153 @@ const Reports: React.FC = () => {
 
   const printBatchReport = (batchName: string, stats: any) => {
       const doc = new jsPDF();
-      if (config.logoUrl) {
-        try { doc.addImage(config.logoUrl, 'PNG', 15, 10, 20, 20); } catch {}
+      const company = config.companyName || 'SISTEMA BARSA';
+      const logo = config.logoUrl;
+      const primaryColor = [23, 37, 84]; // Navy Blue
+
+      // 1. Header
+      if (logo) {
+        try { doc.addImage(logo, 'PNG', 14, 10, 20, 20); } catch {}
       }
 
-      doc.setFontSize(14);
-      doc.text(`Reporte de Lote: ${batchName}`, 40, 20);
-      doc.setFontSize(10);
-      doc.text(`Fecha Impresión: ${new Date().toLocaleString()}`, 40, 26);
-      
-      doc.setFontSize(12);
-      doc.text("Resumen General", 14, 40);
-      doc.setFontSize(10);
-      doc.text(`Total Clientes: ${stats.orderCount}`, 14, 46);
-      doc.text(`Total Neto (kg): ${stats.totalNet.toFixed(2)}`, 14, 52);
-      doc.text(`Bruto: ${stats.totalFull.toFixed(2)} | Tara: ${stats.totalEmpty.toFixed(2)} | Merma: ${stats.totalMort.toFixed(2)}`, 14, 58);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(18);
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.text(company.toUpperCase(), 105, 18, { align: 'center' });
 
-      const tableData = stats.batchOrders.map((o: ClientOrder) => {
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(100);
+      doc.text("REPORTE DE LOTE DE PRODUCCIÓN", 105, 24, { align: 'center' });
+
+      // 2. Info Grid
+      autoTable(doc, {
+        startY: 35,
+        theme: 'plain',
+        styles: { fontSize: 10, cellPadding: 1 },
+        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 30 }, 1: { cellWidth: 70 } },
+        body: [
+            ['Lote:', batchName, 'Clientes:', stats.orderCount],
+            ['Fecha Emisión:', new Date().toLocaleDateString(), 'Hora:', new Date().toLocaleTimeString()],
+        ]
+      });
+
+      // 3. Executive Summary (Weights)
+      autoTable(doc, {
+        startY: (doc as any).lastAutoTable.finalY + 5,
+        theme: 'grid',
+        headStyles: { fillColor: primaryColor, textColor: 255, fontStyle: 'bold', halign: 'center' },
+        columnStyles: { 0: { fontStyle: 'bold' }, 1: { halign: 'right' } },
+        head: [['CONCEPTO', 'PESO TOTAL (kg)']],
+        body: [
+            ['Peso Bruto Total (Llenas)', stats.totalFull.toFixed(2)],
+            ['Peso Tara Total (Vacías)', stats.totalEmpty.toFixed(2)],
+            ['Merma Total', stats.totalMort.toFixed(2)],
+            [{ content: 'PESO NETO TOTAL', styles: { fontStyle: 'bold', fillColor: [241, 245, 249] } }, { content: stats.totalNet.toFixed(2), styles: { fontStyle: 'bold', fontSize: 12, fillColor: [241, 245, 249] } }]
+        ]
+      });
+
+      doc.text("Detalle de Clientes (Pesos)", 14, (doc as any).lastAutoTable.finalY + 10);
+
+      // 4. Client List Table (ONLY WEIGHTS)
+      // Calculate Financials for Summary while iterating
+      let totalSoldMoney = 0;
+      let totalPaidMoney = 0;
+
+      const tableData = stats.batchOrders.map((o: ClientOrder, index: number) => {
           const wFull = o.records.filter(r => r.type === 'FULL').reduce((a, b) => a + b.weight, 0);
           const wEmpty = o.records.filter(r => r.type === 'EMPTY').reduce((a, b) => a + b.weight, 0);
-          const net = (o.weighingMode === WeighingType.SOLO_POLLO ? wFull : wFull - wEmpty).toFixed(2);
-          return [o.clientName, o.paymentStatus, wFull.toFixed(2), wEmpty.toFixed(2), net];
+          const wMort = o.records.filter(r => r.type === 'MORTALITY').reduce((a, b) => a + b.weight, 0);
+          
+          let net = wFull - wEmpty - wMort;
+          if (o.weighingMode === WeighingType.SOLO_POLLO) net = wFull;
+
+          // Financial Calcs
+          const saleAmount = net * o.pricePerKg;
+          const paidAmount = o.payments.reduce((a,b)=>a+b.amount, 0);
+          
+          totalSoldMoney += saleAmount;
+          totalPaidMoney += paidAmount;
+
+          return [
+              index + 1, 
+              o.clientName, 
+              wFull.toFixed(2), 
+              wEmpty.toFixed(2), 
+              wMort.toFixed(2),
+              net.toFixed(2)
+          ];
       });
 
       autoTable(doc, {
-          startY: 65,
-          head: [['Cliente', 'Estado', 'Bruto', 'Tara', 'Neto']],
+          startY: (doc as any).lastAutoTable.finalY + 12,
+          head: [['#', 'Cliente', 'Bruto', 'Tara', 'Merma', 'Neto']],
           body: tableData,
+          theme: 'striped',
+          headStyles: { fillColor: primaryColor },
+          columnStyles: {
+              0: { halign: 'center', cellWidth: 10 },
+              2: { halign: 'right' },
+              3: { halign: 'right' },
+              4: { halign: 'right' },
+              5: { halign: 'right', fontStyle: 'bold' }
+          }
+      });
+      
+      const pendingMoney = totalSoldMoney - totalPaidMoney;
+
+      // 5. Financial Summary at the bottom
+      const finalY = (doc as any).lastAutoTable.finalY;
+      
+      // Check for page break
+      if (finalY > 250) doc.addPage();
+
+      const startYFinancials = finalY > 250 ? 20 : finalY + 10;
+      
+      doc.setFontSize(11);
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.text("RESUMEN FINANCIERO DEL LOTE", 14, startYFinancials);
+
+      autoTable(doc, {
+          startY: startYFinancials + 5,
+          theme: 'grid',
+          headStyles: { fillColor: [21, 128, 61], textColor: 255, fontStyle: 'bold', halign: 'center' }, // Emerald Green
+          columnStyles: { 0: { fontStyle: 'bold', cellWidth: 80 }, 1: { halign: 'right', fontStyle: 'bold' } },
+          head: [['CONCEPTO', 'MONTO (S/.)']],
+          body: [
+              ['Total Venta (Valorizado)', `S/. ${totalSoldMoney.toFixed(2)}`],
+              ['Total Cobrado (Recaudado)', `S/. ${totalPaidMoney.toFixed(2)}`],
+              [{ content: 'TOTAL POR COBRAR (Pendiente)', styles: { textColor: [220, 38, 38] } }, { content: `S/. ${pendingMoney.toFixed(2)}`, styles: { textColor: [220, 38, 38], fontSize: 12 } }]
+          ],
+          tableWidth: 140
       });
 
-      doc.save(`Reporte_${batchName}.pdf`);
+      // Footer
+      const pageCount = (doc as any).internal.getNumberOfPages();
+      for(let i = 1; i <= pageCount; i++) {
+          doc.setPage(i);
+          doc.setFontSize(8);
+          doc.setTextColor(150);
+          doc.text(`Sistema de Gestión Barsa - ${new Date().toLocaleString()}`, 10, 285);
+          doc.text(`Página ${i} de ${pageCount}`, 190, 285, { align: 'right' });
+      }
+
+      doc.save(`Reporte_Lote_${batchName}.pdf`);
   };
 
-  const Chart = ({ orders }: { orders: ClientOrder[] }) => {
-      const data = orders.flatMap(o => o.records.map(r => ({ ...r, client: o.clientName })))
-                         .sort((a,b) => a.timestamp - b.timestamp);
+  // Modified Chart: Only Mortality
+  const MortalityChart = ({ orders }: { orders: ClientOrder[] }) => {
+      // Flatten all records but filter ONLY for MORTALITY
+      const data = orders.flatMap(o => o.records
+          .filter(r => r.type === 'MORTALITY')
+          .map(r => ({ ...r, client: o.clientName }))
+      ).sort((a,b) => a.timestamp - b.timestamp);
 
-      if (data.length < 2) return null;
+      if (data.length < 2) return (
+          <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl text-center text-red-400 text-xs font-bold">
+              Insuficientes datos de merma para graficar.
+          </div>
+      );
 
       const points = data.map((d, i) => {
           return { x: i, y: d.weight };
@@ -103,10 +213,16 @@ const Reports: React.FC = () => {
       }).join(' ');
 
       return (
-          <div className="mb-6 p-4 bg-slate-50 border border-slate-200 rounded-xl">
-              <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Flujo de Pesaje (Histórico General)</h4>
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl">
+              <div className="flex items-center gap-2 mb-2">
+                 <AlertOctagon size={16} className="text-red-500"/>
+                 <h4 className="text-xs font-bold text-red-700 uppercase">Gráfico de Mermas (Kg)</h4>
+              </div>
               <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-20 overflow-visible">
-                   <polyline fill="none" stroke="#1e40af" strokeWidth="2" points={polyline} />
+                   <polyline fill="none" stroke="#dc2626" strokeWidth="2" points={polyline} />
+                   {points.map((p, i) => (
+                       <circle key={i} cx={(i / (points.length - 1)) * w} cy={h - (p.y / max) * h} r="2" fill="#991b1b" />
+                   ))}
               </svg>
           </div>
       );
@@ -117,16 +233,16 @@ const Reports: React.FC = () => {
       return (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-4">
             <div 
-            className="p-6 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors"
+            className="p-4 md:p-6 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors"
             onClick={() => setExpandedBatch(isExpanded ? null : id)}
             >
-            <div className="flex items-center space-x-5">
-                <div className={`p-4 rounded-xl ${id === 'direct-sales' ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-800'}`}>
+            <div className="flex items-center space-x-3 md:space-x-5">
+                <div className={`p-2 md:p-4 rounded-xl ${id === 'direct-sales' ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-800'}`}>
                    {icon}
                 </div>
                 <div>
-                    <h3 className="text-xl font-black text-slate-900">{title}</h3>
-                    <p className="text-sm text-slate-500 font-medium">{subtitle} • {stats.orderCount} Clientes</p>
+                    <h3 className="text-lg md:text-xl font-black text-slate-900">{title}</h3>
+                    <p className="text-xs md:text-sm text-slate-500 font-medium">{subtitle} • {stats.orderCount} Clientes</p>
                 </div>
             </div>
             
@@ -140,7 +256,7 @@ const Reports: React.FC = () => {
             </div>
 
             {isExpanded && (
-            <div className="bg-slate-50 border-t border-slate-200 p-6 animate-fade-in">
+            <div className="bg-slate-50 border-t border-slate-200 p-4 md:p-6 animate-fade-in">
                 
                 <div className="flex justify-end mb-4">
                     <button onClick={() => printBatchReport(title, stats)} className="flex items-center text-sm font-bold text-blue-800 bg-white border border-blue-200 px-3 py-2 rounded-lg hover:bg-blue-50">
@@ -148,25 +264,25 @@ const Reports: React.FC = () => {
                     </button>
                 </div>
 
-                <Chart orders={stats.batchOrders} />
+                <MortalityChart orders={stats.batchOrders} />
 
-                {/* Batch Summary */}
-                <div className="grid grid-cols-4 gap-4 mb-8 text-center">
+                {/* Batch Summary - Grid Responsive */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8 text-center">
                     <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
-                        <p className="text-xs text-slate-400 uppercase font-bold tracking-wider">Bruto</p>
-                        <p className="font-black text-xl text-blue-900">{stats.totalFull.toFixed(2)}</p>
+                        <p className="text-[10px] md:text-xs text-slate-400 uppercase font-bold tracking-wider">Bruto</p>
+                        <p className="font-black text-lg md:text-xl text-blue-900">{stats.totalFull.toFixed(2)}</p>
                     </div>
                     <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
-                        <p className="text-xs text-slate-400 uppercase font-bold tracking-wider">Tara</p>
-                        <p className="font-black text-xl text-orange-600">{stats.totalEmpty.toFixed(2)}</p>
+                        <p className="text-[10px] md:text-xs text-slate-400 uppercase font-bold tracking-wider">Tara</p>
+                        <p className="font-black text-lg md:text-xl text-orange-600">{stats.totalEmpty.toFixed(2)}</p>
                     </div>
                     <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
-                        <p className="text-xs text-slate-400 uppercase font-bold tracking-wider">Merma</p>
-                        <p className="font-black text-xl text-red-600">{stats.totalMort.toFixed(2)}</p>
+                        <p className="text-[10px] md:text-xs text-slate-400 uppercase font-bold tracking-wider">Merma</p>
+                        <p className="font-black text-lg md:text-xl text-red-600">{stats.totalMort.toFixed(2)}</p>
                     </div>
                     <div className="bg-blue-950 p-4 rounded-xl shadow-sm border border-blue-900">
-                        <p className="text-xs text-blue-300 uppercase font-bold tracking-wider">Neto</p>
-                        <p className="font-black text-xl text-white">{stats.totalNet.toFixed(2)}</p>
+                        <p className="text-[10px] md:text-xs text-blue-300 uppercase font-bold tracking-wider">Neto</p>
+                        <p className="font-black text-lg md:text-xl text-white">{stats.totalNet.toFixed(2)}</p>
                     </div>
                 </div>
 
@@ -191,15 +307,15 @@ const Reports: React.FC = () => {
 
                         const renderMiniBox = (title: string, weight: number, count: number, bgClass: string, textClass: string) => (
                              <div className={`p-2 rounded text-center border ${bgClass} border-opacity-50`}>
-                                 <p className="text-[10px] uppercase font-bold opacity-60">{title}</p>
-                                 <p className={`font-bold ${textClass}`}>{weight.toFixed(2)} <span className="text-[10px] opacity-70">({count})</span></p>
+                                 <p className="text-[9px] md:text-[10px] uppercase font-bold opacity-60">{title}</p>
+                                 <p className={`font-bold text-sm md:text-base ${textClass}`}>{weight.toFixed(2)} <span className="text-[9px] opacity-70">({count})</span></p>
                              </div>
                         );
 
                         return (
                             <div key={order.id} className="bg-white rounded-xl border border-slate-200 hover:border-blue-300 transition-colors overflow-hidden">
-                                <div className="p-4 flex flex-col md:flex-row justify-between items-center bg-white">
-                                    <div className="mb-2 md:mb-0">
+                                <div className="p-4 flex flex-col md:flex-row justify-between items-center bg-white gap-4">
+                                    <div className="w-full md:w-auto">
                                         <p className="font-bold text-slate-900 text-lg">{order.clientName}</p>
                                         <div className="flex space-x-2 mt-1">
                                             <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${order.paymentStatus === 'PAID' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
@@ -210,26 +326,26 @@ const Reports: React.FC = () => {
                                             </span>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-6">
-                                        <div className="grid grid-cols-4 gap-4 text-right">
+                                    <div className="w-full md:w-auto flex items-center justify-between md:justify-end gap-6">
+                                        <div className="grid grid-cols-4 gap-2 md:gap-4 text-right flex-1 md:flex-none">
                                             <div>
-                                                <p className="text-[10px] text-slate-400 font-bold uppercase">Bruto</p>
-                                                <p className="font-bold text-slate-700">{wFull.toFixed(2)}</p>
-                                                <p className="text-[9px] text-slate-500 font-bold">{qFull} und</p>
+                                                <p className="text-[9px] md:text-[10px] text-slate-400 font-bold uppercase">Bruto</p>
+                                                <p className="font-bold text-slate-700 text-sm">{wFull.toFixed(2)}</p>
+                                                <p className="text-[8px] md:text-[9px] text-slate-500 font-bold hidden md:block">{qFull} und</p>
                                             </div>
                                             <div>
-                                                <p className="text-[10px] text-slate-400 font-bold uppercase">Tara</p>
-                                                <p className="font-bold text-slate-700">{wEmpty.toFixed(2)}</p>
-                                                <p className="text-[9px] text-slate-500 font-bold">{qEmpty} und</p>
+                                                <p className="text-[9px] md:text-[10px] text-slate-400 font-bold uppercase">Tara</p>
+                                                <p className="font-bold text-slate-700 text-sm">{wEmpty.toFixed(2)}</p>
+                                                <p className="text-[8px] md:text-[9px] text-slate-500 font-bold hidden md:block">{qEmpty} und</p>
                                             </div>
                                             <div>
-                                                <p className="text-[10px] text-slate-400 font-bold uppercase">Merma</p>
-                                                <p className="font-bold text-red-500">{wMort.toFixed(2)}</p>
-                                                <p className="text-[9px] text-red-400 font-bold">{qMort} und</p>
+                                                <p className="text-[9px] md:text-[10px] text-slate-400 font-bold uppercase">Merma</p>
+                                                <p className="font-bold text-red-500 text-sm">{wMort.toFixed(2)}</p>
+                                                <p className="text-[8px] md:text-[9px] text-red-400 font-bold hidden md:block">{qMort} und</p>
                                             </div>
                                             <div className="pl-4 border-l border-slate-100 flex flex-col justify-center">
-                                                <p className="text-[10px] text-slate-400 font-bold uppercase">Total</p>
-                                                <p className="font-black text-slate-900">{net.toFixed(2)}</p>
+                                                <p className="text-[9px] md:text-[10px] text-slate-400 font-bold uppercase">Total</p>
+                                                <p className="font-black text-slate-900 text-base">{net.toFixed(2)}</p>
                                             </div>
                                         </div>
                                         <button onClick={() => setShowDetailOrder(isDetailOpen ? null : order.id)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 text-slate-600">
@@ -240,16 +356,16 @@ const Reports: React.FC = () => {
                                 
                                 {isDetailOpen && (
                                     <div className="bg-slate-50 p-4 border-t border-slate-100">
-                                        <div className="grid grid-cols-3 gap-4 mb-4">
+                                        <div className="grid grid-cols-3 gap-2 md:gap-4 mb-4">
                                             {renderMiniBox("Llenas", wFull, qFull, 'bg-blue-50', 'text-blue-900')}
                                             {renderMiniBox("Vacías", wEmpty, qEmpty, 'bg-orange-50', 'text-orange-800')}
                                             {renderMiniBox("Merma", wMort, qMort, 'bg-red-50', 'text-red-800')}
                                         </div>
                                         
-                                        <div className="grid grid-cols-3 gap-4">
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                             {['FULL', 'EMPTY', 'MORTALITY'].map(type => {
                                                 const records = order.records.filter(r => r.type === type).sort((a,b) => b.timestamp - a.timestamp);
-                                                if(records.length === 0) return <div key={type} className="border border-slate-200 rounded bg-white h-24 flex items-center justify-center text-xs text-slate-300 uppercase">Sin Datos</div>;
+                                                if(records.length === 0) return <div key={type} className="border border-slate-200 rounded bg-white h-16 md:h-24 flex items-center justify-center text-xs text-slate-300 uppercase">Sin Datos</div>;
                                                 return (
                                                     <div key={type} className="border border-slate-200 rounded bg-white overflow-hidden">
                                                         <div className="bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-500 uppercase border-b border-slate-200">

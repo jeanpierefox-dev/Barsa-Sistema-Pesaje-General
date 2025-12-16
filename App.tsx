@@ -40,7 +40,7 @@ const Container: React.FC<{ children: React.ReactNode; title?: string; showBack?
                 <ArrowLeft size={24} />
               </button>
             )}
-            <h1 className="text-xl font-bold tracking-tight">{title || 'AviControl'}</h1>
+            <h1 className="text-xl font-bold tracking-tight">{title || 'SISTEMA BARSA'}</h1>
           </div>
           <div className="flex items-center space-x-4">
             
