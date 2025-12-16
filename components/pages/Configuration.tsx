@@ -1,7 +1,7 @@
 import React, { useState, useContext, useEffect } from 'react';
 import { AppConfig, UserRole } from '../../types';
 import { getConfig, saveConfig, resetApp, isFirebaseConfigured, restoreBackup } from '../../services/storage';
-import { Printer, Save, Check, AlertTriangle, Bluetooth, Link2, MonitorCheck, Database, Cloud, CloudOff, Download, Upload, HardDriveDownload, HardDriveUpload, Smartphone, Share2, Key, Globe, LayoutGrid, Code, Server, QrCode, Copy, X, ArrowDownCircle } from 'lucide-react';
+import { Printer, Save, Check, AlertTriangle, Bluetooth, Link2, MonitorCheck, Database, Cloud, CloudOff, Download, Upload, HardDriveDownload, HardDriveUpload, Smartphone, Share2, Key, Globe, LayoutGrid, Code, Server, QrCode, Copy, X, ArrowDownCircle, RefreshCw } from 'lucide-react';
 import { AuthContext } from '../../App';
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -209,7 +209,7 @@ const Configuration: React.FC = () => {
           {/* LEFT COLUMN: GENERAL SETTINGS */}
           <div className="lg:col-span-2 space-y-8">
               
-              {/* 1. CLOUD SYNC SECTION (HIGHLIGHTED) */}
+              {/* 1. CLOUD SYNC SECTION */}
               {user?.role === UserRole.ADMIN && (
                 <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                     <div className={`p-4 border-b flex justify-between items-center ${isConnected ? 'bg-emerald-50 border-emerald-100' : 'bg-slate-50 border-slate-200'}`}>
@@ -222,121 +222,123 @@ const Configuration: React.FC = () => {
                         </span>
                     </div>
                     
-                    <div className="p-6">
-                        {!isConnected ? (
-                            <div className="space-y-6">
-                                {/* INPUT AREA HIGHLIGHTED */}
-                                <div className="bg-blue-50 border-2 border-blue-200 p-6 rounded-xl text-center shadow-md relative overflow-hidden group">
-                                    <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
-                                        <QrCode size={100} className="text-blue-900" />
-                                    </div>
-
-                                    <div className="relative z-10">
-                                        <div className="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-600">
-                                            <ArrowDownCircle size={32} />
-                                        </div>
-                                        <h4 className="text-xl font-black text-blue-900 mb-2">¿Tienes un código de otro equipo?</h4>
-                                        <p className="text-sm text-blue-700 mb-6 max-w-sm mx-auto font-medium">
-                                            Pega aquí el código largo generado en el dispositivo principal para sincronizar todo automáticamente.
-                                        </p>
-                                        
-                                        <div className="flex flex-col gap-3">
-                                            <input 
-                                                value={importTokenInput}
-                                                onChange={e => setImportTokenInput(e.target.value)}
-                                                placeholder="PEGA EL CÓDIGO DE VINCULACIÓN AQUÍ..."
-                                                className="w-full border-2 border-blue-300 bg-white rounded-lg px-4 py-3 font-mono text-sm focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none text-center font-bold text-blue-900 placeholder-blue-300"
-                                            />
-                                            <button 
-                                                onClick={() => processImportToken(importTokenInput)}
-                                                className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg font-black hover:bg-blue-700 shadow-lg transform active:scale-95 transition-all flex items-center justify-center text-sm"
-                                            >
-                                                <Cloud className="mr-2" size={18}/> VINCULAR AHORA
-                                            </button>
-                                        </div>
-                                    </div>
+                    <div className="p-6 space-y-6">
+                        
+                        {/* A. CONNECTED STATUS ACTIONS (Show first if connected) */}
+                        {isConnected && (
+                            <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+                                <div className="text-center sm:text-left">
+                                    <h4 className="font-bold text-emerald-900 flex items-center justify-center sm:justify-start">
+                                        <Check className="mr-1" size={16}/> Sincronización Activa
+                                    </h4>
+                                    <p className="text-xs text-emerald-700 mt-1">
+                                        ID Proyecto: <span className="font-mono font-bold">{config.firebaseConfig?.projectId}</span>
+                                    </p>
                                 </div>
-                                
-                                <div className="relative flex py-2 items-center">
-                                    <div className="flex-grow border-t border-slate-200"></div>
-                                    <span className="flex-shrink-0 mx-4 text-gray-300 text-xs font-bold uppercase">O Configurar Manualmente</span>
-                                    <div className="flex-grow border-t border-slate-200"></div>
-                                </div>
-
-                                {/* Manual Form Updated for Specific Fields */}
-                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 grid grid-cols-1 gap-4 opacity-80 hover:opacity-100 transition-opacity">
-                                    <p className="text-xs text-slate-400 font-bold col-span-1">Credenciales de Proyecto Firebase</p>
-                                    
-                                    <div>
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Clave API (API Key)</label>
-                                        <input 
-                                            value={config.firebaseConfig?.apiKey || ''} 
-                                            onChange={e => updateFirebaseConfig('apiKey', e.target.value)} 
-                                            className="w-full p-2 border rounded text-xs font-mono border-slate-300 focus:border-blue-500 outline-none"
-                                            placeholder="Ej. AIzaSy..."
-                                        />
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Dominio de autenticación</label>
-                                        <input 
-                                            value={config.firebaseConfig?.authDomain || ''} 
-                                            onChange={e => updateFirebaseConfig('authDomain', e.target.value)} 
-                                            className="w-full p-2 border rounded text-xs font-mono border-slate-300 focus:border-blue-500 outline-none"
-                                            placeholder="Ej. mi-app.firebaseapp.com"
-                                        />
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">URL de la base de datos <span className="text-blue-500">(Nuevo)</span></label>
-                                        <input 
-                                            value={config.firebaseConfig?.databaseURL || ''} 
-                                            onChange={e => updateFirebaseConfig('databaseURL', e.target.value)} 
-                                            className="w-full p-2 border rounded text-xs font-mono border-blue-200 bg-blue-50 focus:border-blue-500 outline-none"
-                                            placeholder="Ej. https://mi-app.firebaseio.com"
-                                        />
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div>
-                                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Identificación del proyecto</label>
-                                            <input 
-                                                value={config.firebaseConfig?.projectId || ''} 
-                                                onChange={e => updateFirebaseConfig('projectId', e.target.value)} 
-                                                className="w-full p-2 border rounded text-xs font-mono border-slate-300 focus:border-blue-500 outline-none"
-                                                placeholder="Ej. mi-proyecto-123"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">ID de la aplicación</label>
-                                            <input 
-                                                value={config.firebaseConfig?.appId || ''} 
-                                                onChange={e => updateFirebaseConfig('appId', e.target.value)} 
-                                                className="w-full p-2 border rounded text-xs font-mono border-slate-300 focus:border-blue-500 outline-none"
-                                                placeholder="Ej. 1:123456:web:..."
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="text-center">
-                                <p className="text-slate-600 mb-6">Este dispositivo está sincronizado y enviando datos a la nube.</p>
-                                
                                 <button 
                                     onClick={generateConnectionData}
-                                    className="bg-white border-2 border-slate-200 hover:border-blue-500 hover:text-blue-600 text-slate-700 px-6 py-4 rounded-xl font-bold flex items-center justify-center w-full shadow-sm transition-all group"
+                                    className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-emerald-700 shadow-md flex items-center text-sm"
                                 >
-                                    <div className="bg-blue-100 p-2 rounded-full mr-3 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                                        <QrCode size={24}/>
-                                    </div>
-                                    <div className="text-left">
-                                        <div className="text-lg">Vincular Otro Dispositivo</div>
-                                        <div className="text-xs font-normal opacity-70">Generar código QR con Clave API y URL de BD</div>
-                                    </div>
+                                    <QrCode size={16} className="mr-2"/> GENERAR CÓDIGO
                                 </button>
                             </div>
                         )}
+
+                        {/* B. IMPORT INPUT CARD (ALWAYS VISIBLE NOW) */}
+                        <div className="bg-blue-50 border-2 border-blue-200 p-6 rounded-xl text-center shadow-md relative overflow-hidden group">
+                            <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
+                                <QrCode size={100} className="text-blue-900" />
+                            </div>
+
+                            <div className="relative z-10">
+                                <div className="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-600">
+                                    <ArrowDownCircle size={32} />
+                                </div>
+                                <h4 className="text-xl font-black text-blue-900 mb-2">
+                                    {isConnected ? 'Cambiar Conexión / Vincular' : '¿Tienes un código de otro equipo?'}
+                                </h4>
+                                <p className="text-sm text-blue-700 mb-6 max-w-sm mx-auto font-medium">
+                                    Pega aquí el código largo generado en el dispositivo principal para {isConnected ? 'sobrescribir la configuración actual' : 'sincronizar todo automáticamente'}.
+                                </p>
+                                
+                                <div className="flex flex-col gap-3">
+                                    <input 
+                                        value={importTokenInput}
+                                        onChange={e => setImportTokenInput(e.target.value)}
+                                        placeholder="PEGA EL CÓDIGO DE VINCULACIÓN AQUÍ..."
+                                        className="w-full border-2 border-blue-300 bg-white rounded-lg px-4 py-3 font-mono text-sm focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none text-center font-bold text-blue-900 placeholder-blue-300"
+                                    />
+                                    <button 
+                                        onClick={() => processImportToken(importTokenInput)}
+                                        className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg font-black hover:bg-blue-700 shadow-lg transform active:scale-95 transition-all flex items-center justify-center text-sm"
+                                    >
+                                        <Cloud className="mr-2" size={18}/> {isConnected ? 'ACTUALIZAR CONEXIÓN' : 'VINCULAR AHORA'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div className="relative flex py-2 items-center">
+                            <div className="flex-grow border-t border-slate-200"></div>
+                            <span className="flex-shrink-0 mx-4 text-gray-300 text-xs font-bold uppercase">O Configurar Manualmente</span>
+                            <div className="flex-grow border-t border-slate-200"></div>
+                        </div>
+
+                        {/* C. MANUAL FORM (ALWAYS VISIBLE) */}
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 grid grid-cols-1 gap-4 opacity-80 hover:opacity-100 transition-opacity">
+                            <p className="text-xs text-slate-400 font-bold col-span-1">Credenciales de Proyecto Firebase</p>
+                            
+                            <div>
+                                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Clave API (API Key)</label>
+                                <input 
+                                    value={config.firebaseConfig?.apiKey || ''} 
+                                    onChange={e => updateFirebaseConfig('apiKey', e.target.value)} 
+                                    className="w-full p-2 border rounded text-xs font-mono border-slate-300 focus:border-blue-500 outline-none"
+                                    placeholder="Ej. AIzaSy..."
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Dominio de autenticación</label>
+                                <input 
+                                    value={config.firebaseConfig?.authDomain || ''} 
+                                    onChange={e => updateFirebaseConfig('authDomain', e.target.value)} 
+                                    className="w-full p-2 border rounded text-xs font-mono border-slate-300 focus:border-blue-500 outline-none"
+                                    placeholder="Ej. mi-app.firebaseapp.com"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">URL de la base de datos <span className="text-blue-500">(Nuevo)</span></label>
+                                <input 
+                                    value={config.firebaseConfig?.databaseURL || ''} 
+                                    onChange={e => updateFirebaseConfig('databaseURL', e.target.value)} 
+                                    className="w-full p-2 border rounded text-xs font-mono border-blue-200 bg-blue-50 focus:border-blue-500 outline-none"
+                                    placeholder="Ej. https://mi-app.firebaseio.com"
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Identificación del proyecto</label>
+                                    <input 
+                                        value={config.firebaseConfig?.projectId || ''} 
+                                        onChange={e => updateFirebaseConfig('projectId', e.target.value)} 
+                                        className="w-full p-2 border rounded text-xs font-mono border-slate-300 focus:border-blue-500 outline-none"
+                                        placeholder="Ej. mi-proyecto-123"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">ID de la aplicación</label>
+                                    <input 
+                                        value={config.firebaseConfig?.appId || ''} 
+                                        onChange={e => updateFirebaseConfig('appId', e.target.value)} 
+                                        className="w-full p-2 border rounded text-xs font-mono border-slate-300 focus:border-blue-500 outline-none"
+                                        placeholder="Ej. 1:123456:web:..."
+                                    />
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
               )}
