@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { User, UserRole } from './types';
-import { LogOut, ArrowLeft, Cloud, CloudOff, X, Zap, Flame, ExternalLink, Settings, Check, Save, Globe, Database, Key, Box, Hash, Server, ShieldAlert, Loader2 } from 'lucide-react';
-import { isFirebaseConfigured, initCloudSync, getConfig, saveConfig, validateConfig } from './services/storage';
+import { LogOut, ArrowLeft, Cloud, CloudOff, X, Zap, Flame, ExternalLink, Settings, Check, Save, Globe, Database, Key, Box, Hash, Server, ShieldAlert, Loader2, Play, Power } from 'lucide-react';
+import { isFirebaseConfigured, initCloudSync, getConfig, saveConfig, validateConfig, seedCloudDatabase } from './services/storage';
 
 // Pages
 import LoginPage from './components/pages/Login';
@@ -30,7 +30,12 @@ const Container: React.FC<{ children: React.ReactNode; title?: string; showBack?
   // Connection Modal State
   const [showConnectionModal, setShowConnectionModal] = useState(false);
   const [orgIdInput, setOrgIdInput] = useState(getConfig().organizationId || '');
-  const [isTesting, setIsTesting] = useState(false);
+  
+  // States for Process/Connect split
+  const [isProcessing, setIsProcessing] = useState(false); // Validating
+  const [isConnecting, setIsConnecting] = useState(false); // Seeding/Saving
+  const [processSuccess, setProcessSuccess] = useState(false); // Validation passed
+  const [tempConfig, setTempConfig] = useState<any>(null); // Store valid config temporarily
   const [testError, setTestError] = useState('');
   
   // Tab State: 'code' or 'manual'
@@ -67,23 +72,22 @@ const Container: React.FC<{ children: React.ReactNode; title?: string; showBack?
 
   if (!user) return <Navigate to="/login" />;
 
-  const handleConnect = async () => {
+  // Step 1: Validate Inputs
+  const handleProcess = async () => {
     setTestError('');
-    setIsTesting(true);
+    setProcessSuccess(false);
+    setIsProcessing(true);
+    setTempConfig(null);
 
     try {
-        const currentConfig = getConfig();
         let firebaseConfig: any = {};
 
         if (connectionTab === 'manual') {
-            // Trim inputs explicitly
             const cleanApiKey = manualApiKey.trim();
             const cleanProjectId = manualProjectId.trim();
 
             if (!cleanApiKey || !cleanProjectId) {
-                setTestError("API Key y Project ID son obligatorios.");
-                setIsTesting(false);
-                return;
+                throw new Error("API Key y Project ID son obligatorios.");
             }
 
             firebaseConfig = {
@@ -95,11 +99,8 @@ const Container: React.FC<{ children: React.ReactNode; title?: string; showBack?
             };
 
         } else {
-            // Parse Code Logic
             if (!rawConfigInput.trim()) {
-                setTestError("Pegue el código de configuración primero.");
-                setIsTesting(false);
-                return;
+                 throw new Error("Pegue el código de configuración primero.");
             }
             
             const extract = (key: string) => {
@@ -112,9 +113,7 @@ const Container: React.FC<{ children: React.ReactNode; title?: string; showBack?
             const projectId = extract('projectId');
 
             if (!apiKey || !projectId) {
-                setTestError("No se encontraron credenciales válidas en el texto.");
-                setIsTesting(false);
-                return;
+                 throw new Error("No se encontraron credenciales válidas en el texto.");
             }
 
             firebaseConfig = {
@@ -128,34 +127,59 @@ const Container: React.FC<{ children: React.ReactNode; title?: string; showBack?
             };
         }
 
-        // --- STEP 1: VALIDATE CONNECTION BEFORE SAVING ---
+        // VALIDATE CONNECTION
         const validation = await validateConfig(firebaseConfig);
         
         if (!validation.valid) {
-            setTestError("CONEXIÓN FALLIDA: " + validation.error);
-            setIsTesting(false);
-            return;
+            throw new Error("FALLÓ LA PRUEBA: " + validation.error);
         }
 
-        // --- STEP 2: SAVE ONLY IF VALID ---
+        // If valid, store for step 2
+        setTempConfig(firebaseConfig);
+        setProcessSuccess(true);
+
+    } catch (error: any) {
+        console.error("Validation Error:", error);
+        setTestError(error.message);
+        setProcessSuccess(false);
+    } finally {
+        setIsProcessing(false);
+    }
+  };
+
+  // Step 2: Save and Connect
+  const handleFinalConnect = async () => {
+      if (!tempConfig) return;
+      
+      setIsConnecting(true);
+      setTestError('');
+
+      try {
+        const currentConfig = getConfig();
+        
         const newConfig = {
             ...currentConfig,
             organizationId: orgIdInput.trim(),
-            firebaseConfig
+            firebaseConfig: tempConfig
         };
 
-        saveConfig(newConfig);
-        alert("✅ Conexión exitosa. El sistema se reiniciará para sincronizar.");
-        setShowConnectionModal(false);
-        initCloudSync();
-        setIsCloudConnected(true);
-        setTimeout(() => window.location.reload(), 1000);
+        // CRITICAL: Seed Database
+        try {
+            await seedCloudDatabase(newConfig);
+        } catch (seedError: any) {
+            throw new Error("Error creando base de datos: " + seedError.message);
+        }
 
-    } catch (error: any) {
-        console.error("Connection Error:", error);
-        setTestError("Error inesperado: " + error.message);
-        setIsTesting(false);
-    }
+        // Save and Reload
+        saveConfig(newConfig);
+        alert("✅ CONEXIÓN ESTABLECIDA Y BASE DE DATOS CREADA.\n\nEl sistema se reiniciará. Ya puedes vincular otros dispositivos.");
+        window.location.reload();
+
+      } catch (error: any) {
+          console.error("Connection Error:", error);
+          setTestError("Error Crítico al Conectar: " + error.message);
+          setIsConnecting(false);
+      }
   };
 
   return (
@@ -231,13 +255,13 @@ const Container: React.FC<{ children: React.ReactNode; title?: string; showBack?
                       {/* Tabs */}
                       <div className="flex border-b border-slate-700">
                           <button 
-                            onClick={() => setConnectionTab('manual')}
+                            onClick={() => { setConnectionTab('manual'); setProcessSuccess(false); }}
                             className={`px-4 py-2 text-xs font-bold uppercase tracking-wider border-b-2 transition-colors ${connectionTab === 'manual' ? 'border-blue-500 text-white' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
                           >
                             Entrada Manual
                           </button>
                           <button 
-                            onClick={() => setConnectionTab('code')}
+                            onClick={() => { setConnectionTab('code'); setProcessSuccess(false); }}
                             className={`px-4 py-2 text-xs font-bold uppercase tracking-wider border-b-2 transition-colors ${connectionTab === 'code' ? 'border-blue-500 text-white' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
                           >
                             Pegar Código
@@ -255,7 +279,7 @@ const Container: React.FC<{ children: React.ReactNode; title?: string; showBack?
                                       <Key size={10} className="mr-1"/> API Key <span className="text-red-500 ml-1">*</span>
                                   </label>
                                   <input 
-                                      value={manualApiKey} onChange={e => setManualApiKey(e.target.value)}
+                                      value={manualApiKey} onChange={e => { setManualApiKey(e.target.value); setProcessSuccess(false); }}
                                       className="w-full bg-white border border-slate-300 rounded p-2.5 text-slate-900 text-xs font-mono focus:border-blue-500 outline-none shadow-inner"
                                       placeholder="AIzaSy..."
                                   />
@@ -285,7 +309,7 @@ const Container: React.FC<{ children: React.ReactNode; title?: string; showBack?
                                       <Box size={10} className="mr-1"/> Project ID <span className="text-red-500 ml-1">*</span>
                                   </label>
                                   <input 
-                                      value={manualProjectId} onChange={e => setManualProjectId(e.target.value)}
+                                      value={manualProjectId} onChange={e => { setManualProjectId(e.target.value); setProcessSuccess(false); }}
                                       className="w-full bg-white border border-slate-300 rounded p-2.5 text-slate-900 text-xs font-mono focus:border-blue-500 outline-none shadow-inner"
                                       placeholder="myapp-12345"
                                   />
@@ -307,7 +331,7 @@ const Container: React.FC<{ children: React.ReactNode; title?: string; showBack?
                                   <p className="text-slate-400 text-xs mb-2">Pegue el objeto de configuración JS completo:</p>
                                   <textarea 
                                     value={rawConfigInput}
-                                    onChange={e => setRawConfigInput(e.target.value)}
+                                    onChange={e => { setRawConfigInput(e.target.value); setProcessSuccess(false); }}
                                     className="w-full h-40 bg-white text-slate-900 font-mono text-sm p-3 border border-slate-300 rounded outline-none resize-none shadow-inner"
                                     placeholder={`const firebaseConfig = {\n  apiKey: "...",\n  authDomain: "...",\n  projectId: "..."\n};`}
                                   />
@@ -318,20 +342,39 @@ const Container: React.FC<{ children: React.ReactNode; title?: string; showBack?
                       {/* ERROR DISPLAY */}
                       {testError && (
                           <div className="mt-4 p-3 bg-red-900/50 border border-red-500 rounded text-red-200 text-xs font-mono break-words">
-                              <strong className="block mb-1">Error de Validación:</strong>
+                              <strong className="block mb-1">Mensaje de Sistema:</strong>
                               {testError}
                           </div>
                       )}
+                      
+                      {/* SUCCESS DISPLAY */}
+                      {processSuccess && !testError && (
+                          <div className="mt-4 p-3 bg-emerald-900/50 border border-emerald-500 rounded text-emerald-200 text-xs font-mono">
+                              <strong>¡Configuración Válida!</strong><br/>
+                              Credenciales procesadas correctamente. Ahora pulse "Conectar".
+                          </div>
+                      )}
 
-                      {/* Footer Actions */}
-                      <div className="mt-6">
+                      {/* Footer Actions - SPLIT BUTTONS */}
+                      <div className="mt-6 flex gap-3">
+                          {/* BUTTON 1: PROCESS */}
                           <button 
-                            onClick={handleConnect}
-                            disabled={isTesting}
-                            className={`w-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-black py-4 rounded-lg shadow-lg shadow-blue-900/50 uppercase tracking-widest text-sm transition-all active:scale-95 flex items-center justify-center ${isTesting ? 'opacity-70 cursor-wait' : ''}`}
+                            onClick={handleProcess}
+                            disabled={isProcessing || isConnecting || processSuccess}
+                            className={`flex-1 bg-blue-700 hover:bg-blue-600 disabled:bg-slate-700 disabled:text-slate-500 text-white font-black py-4 rounded-lg shadow-lg uppercase tracking-wider text-xs transition-all flex items-center justify-center ${processSuccess ? 'opacity-50' : ''}`}
                           >
-                              {isTesting ? <Loader2 className="animate-spin mr-2"/> : <Save className="mr-2" size={18}/>}
-                              {isTesting ? 'PROBANDO CONEXIÓN...' : 'PROBAR Y CONECTAR'}
+                              {isProcessing ? <Loader2 className="animate-spin mr-2"/> : <Play className="mr-2" size={16}/>}
+                              {isProcessing ? 'Verificando...' : '1. Procesar'}
+                          </button>
+
+                          {/* BUTTON 2: CONNECT */}
+                          <button 
+                            onClick={handleFinalConnect}
+                            disabled={!processSuccess || isConnecting}
+                            className={`flex-1 font-black py-4 rounded-lg shadow-lg uppercase tracking-wider text-xs transition-all flex items-center justify-center ${processSuccess ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/50' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
+                          >
+                              {isConnecting ? <Loader2 className="animate-spin mr-2"/> : <Power className="mr-2" size={16}/>}
+                              {isConnecting ? 'Creando DB...' : '2. Conectar'}
                           </button>
                       </div>
                       
@@ -339,9 +382,9 @@ const Container: React.FC<{ children: React.ReactNode; title?: string; showBack?
                       <div className="mt-6 border-t border-slate-800 pt-4 flex gap-3">
                            <ShieldAlert className="text-yellow-500 flex-shrink-0" size={24}/>
                            <div>
-                               <p className="text-xs font-bold text-yellow-500 uppercase mb-1">¿Error de Permisos / Datos no cargan?</p>
+                               <p className="text-xs font-bold text-yellow-500 uppercase mb-1">¿Error de Permisos?</p>
                                <p className="text-[10px] text-slate-500">
-                                   Si la conexión es exitosa pero no ves datos, asegúrate de que tus <strong>Reglas de Firestore</strong> permitan lectura/escritura (Modo Test).
+                                   Si falla la conexión, asegúrate de que las reglas en Firebase Console sean: <code>allow read, write: if true;</code>
                                </p>
                            </div>
                       </div>

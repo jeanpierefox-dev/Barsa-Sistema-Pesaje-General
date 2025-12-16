@@ -1,7 +1,7 @@
 import React, { useState, useContext, useEffect } from 'react';
 import { AppConfig, UserRole } from '../../types';
 import { getConfig, saveConfig, resetApp, isFirebaseConfigured, restoreBackup } from '../../services/storage';
-import { Save, Check, AlertTriangle, Cloud, Download, Upload, HardDriveDownload, QrCode, Copy, X, ArrowDownCircle, Info, Settings, Building2 } from 'lucide-react';
+import { Save, Check, AlertTriangle, Cloud, Download, Upload, HardDriveDownload, QrCode, Copy, X, ArrowDownCircle, Info, Settings, Building2, ChevronDown, ChevronUp, Users, Printer, Scale, Bluetooth } from 'lucide-react';
 import { AuthContext } from '../../App';
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -11,6 +11,9 @@ const Configuration: React.FC = () => {
   const { user } = useContext(AuthContext);
   const [isConnected, setIsConnected] = useState(false);
   
+  // Collapsed State for Linking
+  const [isLinkingExpanded, setIsLinkingExpanded] = useState(false);
+
   // Connection State
   const [showQR, setShowQR] = useState(false);
   const [connectionToken, setConnectionToken] = useState('');
@@ -166,13 +169,13 @@ const Configuration: React.FC = () => {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 pb-10">
+    <div className="max-w-4xl mx-auto space-y-6 pb-10">
       
       {/* HEADER */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
-            <h2 className="text-3xl font-black text-slate-900">Configuración del Sistema</h2>
-            <p className="text-slate-500">Ajustes generales y vinculación de dispositivos</p>
+            <h2 className="text-3xl font-black text-slate-900">Configuración</h2>
+            <p className="text-slate-500">Ajustes generales del sistema</p>
           </div>
           <button 
             onClick={handleSave}
@@ -183,119 +186,165 @@ const Configuration: React.FC = () => {
           </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
           {/* LEFT COLUMN: GENERAL SETTINGS */}
-          <div className="lg:col-span-2 space-y-8">
+          <div className="lg:col-span-2 space-y-6">
               
-              {/* 1. CLOUD SYNC SECTION */}
+              {/* 1. CLOUD SYNC SECTION (COMPACT) */}
               {user?.role === UserRole.ADMIN && (
-                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                    <div className={`p-4 border-b flex justify-between items-center ${isConnected ? 'bg-emerald-50 border-emerald-100' : 'bg-slate-50 border-slate-200'}`}>
-                        <h3 className="font-bold text-lg text-slate-800 flex items-center">
-                            <Cloud className={`mr-2 ${isConnected ? 'text-emerald-600' : 'text-slate-400'}`} />
-                            Vinculación de Dispositivos
-                        </h3>
-                        <span className={`text-[10px] uppercase font-bold px-2 py-1 rounded border ${isConnected ? 'bg-white text-emerald-600 border-emerald-200' : 'bg-white text-slate-400 border-slate-200'}`}>
-                            {isConnected ? 'CONECTADO' : 'DESCONECTADO'}
-                        </span>
-                    </div>
-                    
-                    <div className="p-6 space-y-6">
-                        
-                        {/* A. CONNECTED ACTIONS */}
-                        {isConnected ? (
-                            <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4">
-                                <div className="text-center sm:text-left">
-                                    <h4 className="font-bold text-emerald-900 flex items-center justify-center sm:justify-start">
-                                        <Check className="mr-1" size={16}/> Base de Datos Activa
-                                    </h4>
-                                    <p className="text-xs text-emerald-700 mt-1">
-                                        Proyecto: <span className="font-mono font-bold">{config.firebaseConfig?.projectId}</span>
-                                    </p>
-                                </div>
-                                <button 
-                                    onClick={generateConnectionData}
-                                    className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-emerald-700 shadow-md flex items-center text-sm"
-                                >
-                                    <QrCode size={16} className="mr-2"/> GENERAR QR VINCULACIÓN
-                                </button>
-                            </div>
-                        ) : (
-                            <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl text-center">
-                                <p className="text-sm text-slate-500 mb-2">Este dispositivo funciona en modo local.</p>
-                                <p className="text-xs text-slate-400">Para sincronizar, conecta una base de datos usando el icono de la nube en la barra superior.</p>
-                            </div>
-                        )}
-
-                        {/* B. IMPORT INPUT */}
-                        <div className="bg-blue-50 border-2 border-blue-200 p-6 rounded-xl text-center shadow-md relative overflow-hidden group">
-                            <div className="relative z-10">
-                                <div className="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-600">
-                                    <ArrowDownCircle size={32} />
-                                </div>
-                                <h4 className="text-xl font-black text-blue-900 mb-2">
-                                    {isConnected ? '¿Vincular OTRO dispositivo?' : '¿Tienes un código de otro equipo?'}
-                                </h4>
-                                <p className="text-sm text-blue-700 mb-6 max-w-sm mx-auto font-medium">
-                                    Si este es un dispositivo nuevo, pega aquí el código generado en el dispositivo principal.
-                                </p>
-                                <div className="flex flex-col gap-3">
-                                    <input 
-                                        value={importTokenInput}
-                                        onChange={e => setImportTokenInput(e.target.value)}
-                                        placeholder="PEGAR CÓDIGO AQUÍ..."
-                                        className="w-full border-2 border-blue-300 bg-white rounded-lg px-4 py-3 font-mono text-sm focus:border-blue-600 outline-none text-center font-bold text-blue-900"
-                                    />
-                                    <button onClick={() => processImportToken(importTokenInput)} className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg font-black hover:bg-blue-700 shadow-lg flex items-center justify-center text-sm">
-                                        <Cloud className="mr-2" size={18}/> VINCULAR AHORA
-                                    </button>
-                                </div>
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div 
+                        className={`p-4 flex justify-between items-center cursor-pointer transition-colors ${isConnected ? 'bg-emerald-50' : 'bg-slate-50'}`}
+                        onClick={() => setIsLinkingExpanded(!isLinkingExpanded)}
+                    >
+                        <div className="flex items-center">
+                            <Cloud className={`mr-3 ${isConnected ? 'text-emerald-600' : 'text-slate-400'}`} />
+                            <div>
+                                <h3 className={`font-bold text-sm ${isConnected ? 'text-emerald-800' : 'text-slate-600'}`}>
+                                    {isConnected ? 'Sistema en Nube Activo' : 'Sistema Local (Sin Conexión)'}
+                                </h3>
+                                {isConnected && <p className="text-[10px] text-emerald-600 font-mono">{config.firebaseConfig?.projectId}</p>}
                             </div>
                         </div>
+                        <div className="flex items-center gap-2">
+                             {isConnected && (
+                                 <button onClick={(e) => { e.stopPropagation(); navigate('/usuarios'); }} className="text-xs bg-white border border-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg font-bold flex items-center hover:bg-emerald-100">
+                                     <Users size={14} className="mr-1"/> Usuarios Vinculados
+                                 </button>
+                             )}
+                             {isLinkingExpanded ? <ChevronUp className="text-slate-400"/> : <ChevronDown className="text-slate-400"/>}
+                        </div>
                     </div>
+                    
+                    {/* EXPANDABLE SECTION FOR LINKING/QR */}
+                    {isLinkingExpanded && (
+                        <div className="p-4 border-t border-slate-100 bg-white animate-fade-in">
+                            {isConnected ? (
+                                <div className="space-y-4">
+                                    <div className="flex items-center justify-between bg-slate-50 p-3 rounded-lg border border-slate-100">
+                                        <div className="text-xs text-slate-500">
+                                            Utiliza este código para conectar otros dispositivos (celulares, tablets) a esta misma base de datos.
+                                        </div>
+                                        <button 
+                                            onClick={generateConnectionData}
+                                            className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 shadow-md flex items-center text-xs ml-4 whitespace-nowrap"
+                                        >
+                                            <QrCode size={14} className="mr-2"/> MOSTRAR QR
+                                        </button>
+                                    </div>
+                                    
+                                    <div className="mt-2 pt-2 border-t border-slate-100">
+                                        <p className="text-[10px] uppercase font-bold text-slate-400 mb-2">Vincular usando código de texto</p>
+                                        <div className="flex gap-2">
+                                            <input 
+                                                value={importTokenInput}
+                                                onChange={e => setImportTokenInput(e.target.value)}
+                                                placeholder="Pegar código de otro equipo aquí..."
+                                                className="flex-1 border border-slate-300 rounded px-3 py-2 text-xs font-mono focus:border-blue-500 outline-none"
+                                            />
+                                            <button onClick={() => processImportToken(importTokenInput)} className="bg-slate-800 text-white px-3 py-2 rounded font-bold text-xs hover:bg-slate-700">
+                                                VINCULAR
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="text-center py-4">
+                                    <p className="text-sm text-slate-500 mb-2">Para vincular dispositivos, primero debes conectar la Nube.</p>
+                                    <p className="text-xs text-slate-400">Usa el botón de la nube en la barra superior derecha.</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
               )}
 
               {/* 2. GENERAL INFO */}
-              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-6">
-                <h3 className="font-bold text-lg text-slate-800 border-b pb-2">Datos de la Empresa</h3>
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+                <h3 className="font-bold text-base text-slate-800 border-b pb-2 flex items-center"><Building2 size={18} className="mr-2 text-slate-400"/> Datos de la Empresa</h3>
                 
-                <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">Nombre Comercial</label>
-                    <input 
-                        value={config.companyName}
-                        onChange={e => setConfig({...config, companyName: e.target.value})}
-                        className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 font-medium text-gray-900 focus:border-blue-500 outline-none"
-                    />
-                </div>
-
-                <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">Logo</label>
-                    <div className="flex items-center space-x-4">
-                        {config.logoUrl ? (
-                            <img src={config.logoUrl} alt="Logo" className="h-20 w-20 object-contain border rounded bg-white" />
-                        ) : (
-                            <div className="h-20 w-20 bg-gray-50 rounded border border-dashed border-gray-300 flex items-center justify-center text-xs text-gray-400">Sin Logo</div>
-                        )}
-                        <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-bold transition-colors">
-                            Subir Imagen
-                            <input type="file" onChange={handleLogoUpload} className="hidden" accept="image/*" />
-                        </label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Nombre Comercial</label>
+                        <input 
+                            value={config.companyName}
+                            onChange={e => setConfig({...config, companyName: e.target.value})}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 font-bold text-gray-800 focus:border-blue-500 outline-none text-sm"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Logo</label>
+                        <div className="flex items-center space-x-3">
+                            {config.logoUrl ? (
+                                <img src={config.logoUrl} alt="Logo" className="h-10 w-10 object-contain border rounded bg-white" />
+                            ) : (
+                                <div className="h-10 w-10 bg-gray-50 rounded border border-dashed border-gray-300 flex items-center justify-center text-[10px] text-gray-400">Sin Logo</div>
+                            )}
+                            <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">
+                                Cambiar
+                                <input type="file" onChange={handleLogoUpload} className="hidden" accept="image/*" />
+                            </label>
+                        </div>
                     </div>
                 </div>
               </div>
+
+               {/* 3. HARDWARE & PERIPHERALS (NEW SECTION) */}
+               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+                <h3 className="font-bold text-base text-slate-800 border-b pb-2 flex items-center"><Settings size={18} className="mr-2 text-slate-400"/> Hardware y Periféricos</h3>
+                
+                <div className="space-y-3">
+                    <label className="flex items-center justify-between p-3 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-50 transition-colors">
+                          <div className="flex items-center">
+                              <div className={`p-2 rounded-lg mr-3 ${config.printerConnected ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-400'}`}>
+                                  <Printer size={20}/>
+                              </div>
+                              <div>
+                                  <span className="block font-bold text-slate-700 text-sm">Impresora Térmica (Ticket)</span>
+                                  <span className="text-[10px] text-slate-400">Conexión vía Bluetooth / USB</span>
+                              </div>
+                          </div>
+                          <div className={`w-10 h-5 flex items-center rounded-full p-1 duration-300 ease-in-out ${config.printerConnected ? 'bg-blue-600' : 'bg-slate-300'}`}>
+                              <input type="checkbox" className="hidden" 
+                                checked={config.printerConnected}
+                                onChange={() => setConfig({...config, printerConnected: !config.printerConnected})}
+                              /> 
+                              <div className={`bg-white w-3 h-3 rounded-full shadow-md transform duration-300 ease-in-out ${config.printerConnected ? 'translate-x-5' : ''}`}></div>
+                          </div>
+                    </label>
+
+                    <label className="flex items-center justify-between p-3 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-50 transition-colors">
+                          <div className="flex items-center">
+                              <div className={`p-2 rounded-lg mr-3 ${config.scaleConnected ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+                                  <Scale size={20}/>
+                              </div>
+                              <div>
+                                  <span className="block font-bold text-slate-700 text-sm">Balanza Digital (Serial)</span>
+                                  <span className="text-[10px] text-slate-400">Lectura automática de peso (Simulado)</span>
+                              </div>
+                          </div>
+                          <div className={`w-10 h-5 flex items-center rounded-full p-1 duration-300 ease-in-out ${config.scaleConnected ? 'bg-emerald-600' : 'bg-slate-300'}`}>
+                              <input type="checkbox" className="hidden" 
+                                checked={config.scaleConnected}
+                                onChange={() => setConfig({...config, scaleConnected: !config.scaleConnected})}
+                              /> 
+                              <div className={`bg-white w-3 h-3 rounded-full shadow-md transform duration-300 ease-in-out ${config.scaleConnected ? 'translate-x-5' : ''}`}></div>
+                          </div>
+                    </label>
+                </div>
+              </div>
+
           </div>
 
           {/* RIGHT COLUMN: TOOLS */}
-          <div className="space-y-8">
+          <div className="space-y-6">
               {/* BACKUP TOOLS */}
               {user?.role === UserRole.ADMIN && (
-                 <div className="bg-amber-50 rounded-2xl shadow-sm border border-amber-200 p-6">
-                     <h3 className="font-bold text-lg text-amber-900 mb-4 flex items-center"><HardDriveDownload size={18} className="mr-2"/> Respaldo Local</h3>
-                     <p className="text-xs text-amber-800 mb-4">Guardar o cargar datos manualmente.</p>
+                 <div className="bg-amber-50 rounded-xl shadow-sm border border-amber-200 p-5">
+                     <h3 className="font-bold text-sm text-amber-900 mb-3 flex items-center"><HardDriveDownload size={16} className="mr-2"/> Respaldo Local</h3>
                      
-                     <div className="grid grid-cols-2 gap-2">
+                     <div className="grid grid-cols-2 gap-2 mb-3">
                          <button onClick={handleDownloadBackup} className="bg-white border border-amber-300 text-amber-800 p-2 rounded-lg text-xs font-bold hover:bg-amber-100 flex flex-col items-center justify-center gap-1">
                              <Download size={16}/> Descargar
                          </button>
@@ -305,21 +354,21 @@ const Configuration: React.FC = () => {
                      </div>
                      
                      {showBackupInput && (
-                         <div className="mt-3">
+                         <div className="mt-2">
                              <textarea 
                                  value={backupString}
                                  onChange={e => setBackupString(e.target.value)}
-                                 className="w-full h-20 p-2 text-[10px] rounded border border-amber-300 mb-2 font-mono"
-                                 placeholder='Pegar contenido JSON aquí...'
+                                 className="w-full h-16 p-2 text-[10px] rounded border border-amber-300 mb-2 font-mono"
+                                 placeholder='Pegar JSON aquí...'
                              />
-                             <button onClick={handleRestoreBackup} className="w-full bg-amber-600 text-white py-1 rounded text-xs font-bold">RESTAURAR AHORA</button>
+                             <button onClick={handleRestoreBackup} className="w-full bg-amber-600 text-white py-1.5 rounded text-xs font-bold hover:bg-amber-700">RESTAURAR</button>
                          </div>
                      )}
                  </div>
               )}
               
-              <div className="pt-4">
-                  <button onClick={handleReset} className="w-full text-red-500 hover:text-red-700 text-xs font-bold flex items-center justify-center gap-1 p-2 rounded hover:bg-red-50 transition-colors">
+              <div className="pt-2">
+                  <button onClick={handleReset} className="w-full text-red-500 hover:text-red-700 text-xs font-bold flex items-center justify-center gap-1 p-2 rounded hover:bg-red-50 transition-colors border border-transparent hover:border-red-100">
                       <AlertTriangle size={14}/> RESTABLECER FÁBRICA
                   </button>
               </div>

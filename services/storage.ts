@@ -11,7 +11,6 @@ const KEYS = {
 };
 
 // --- Helper: Safe Parse ---
-// Prevents white screen if localStorage contains garbage data
 const safeParse = (key: string, fallback: any) => {
     try {
         const item = localStorage.getItem(key);
@@ -24,27 +23,61 @@ const safeParse = (key: string, fallback: any) => {
 
 // --- Validator Helper ---
 export const validateConfig = async (firebaseConfig: any): Promise<{ valid: boolean; error?: string }> => {
+    let app: any = null;
     try {
         if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
             return { valid: false, error: "Faltan campos obligatorios (API Key o Project ID)." };
         }
 
-        // Create a temporary app instance to test validity
-        const tempName = 'validator_' + Date.now();
-        const app = initializeApp(firebaseConfig, tempName);
-        
-        // Check if we can initialize Firestore
+        const tempName = 'validator_' + Date.now() + Math.random().toString(36).substring(7);
+        app = initializeApp(firebaseConfig, tempName);
         const db = getFirestore(app);
-        
-        // We don't perform a network call here to avoid waiting too long or CORS issues on simple validation,
-        // but if the config is malformed (e.g. invalid chars in project ID), initializeApp usually throws.
-        
-        // Clean up
-        await deleteApp(app);
         
         return { valid: true };
     } catch (e: any) {
         return { valid: false, error: e.message || "La configuración no es válida." };
+    } finally {
+        if (app) {
+            try { await deleteApp(app); } catch (e) { console.warn("Error cleanup temp app", e); }
+        }
+    }
+};
+
+// --- CRITICAL: SEED DATABASE ON CONNECTION (OPTIMIZED) ---
+// Changed to ONLY upload Users and Config to make connection instant.
+// Heavy data (Batches/Orders) will sync in background via initCloudSync.
+export const seedCloudDatabase = async (config: AppConfig) => {
+    if (!config.firebaseConfig) return;
+    
+    console.log("🌱 Iniciando creación rápida de base de datos...");
+    const tempName = 'seeder_' + Date.now();
+    const app = initializeApp(config.firebaseConfig, tempName);
+    const db = getFirestore(app);
+
+    try {
+        const users = getUsers();
+        
+        // Parallel upload for speed (only Users are critical for immediate login)
+        const userPromises = users.map(u => setDoc(doc(db, 'users', u.id), u));
+        
+        // Upload config metadata if needed
+        const configPromise = setDoc(doc(db, 'config', 'main'), { 
+            companyName: config.companyName,
+            updatedAt: Date.now()
+        });
+
+        await Promise.all([...userPromises, configPromise]);
+        
+        console.log("✅ Base de datos inicializada (Usuarios cargados).");
+
+    } catch (e: any) {
+        console.error("Error sembrando DB:", e);
+        if (e.code === 'permission-denied') {
+            throw new Error("Permisos denegados. Ve a Firebase Console -> Firestore Database -> Reglas y cámbialas a 'allow read, write: if true;'");
+        }
+        throw e;
+    } finally {
+        await deleteApp(app);
     }
 };
 
@@ -52,36 +85,36 @@ export const validateConfig = async (firebaseConfig: any): Promise<{ valid: bool
 let db: any = null;
 let unsubscribers: Function[] = [];
 
-// Helper to push all local data to cloud immediately upon connection
+// Helper to push all local data to cloud immediately upon connection (Runtime sync)
+// Optimized to use Promise.all for parallel uploads instead of sequential loops
 const uploadLocalToCloud = async () => {
   if (!db) return;
-  console.log("⬆️ Iniciando subida de datos locales a la nube...");
-
-  const collections = [
-      { name: 'users', data: getUsers() },
-      { name: 'batches', data: getBatches() },
-      { name: 'orders', data: getOrders() }
-  ];
+  console.log("⬆️ Subiendo datos locales en segundo plano...");
   
-  for (const col of collections) {
-      for (const item of col.data) {
+  const uploadCollection = async (colName: string, data: any[]) => {
+      const promises = data.map(item => {
           if (item && item.id) {
-            try {
-              // merge: true ensures we don't overwrite if cloud has newer specific fields (though normally complete overwrite is fine here)
-              await setDoc(doc(db, col.name, item.id), item, { merge: true });
-            } catch(e) {
-              console.error(`Error syncing item ${item.id} to cloud:`, e);
-            }
+              return setDoc(doc(db, colName, item.id), item, { merge: true })
+                     .catch(e => console.error(`Error uploading ${item.id}:`, e));
           }
-      }
-  }
-  console.log("✅ Datos locales sincronizados con la nube.");
+          return Promise.resolve();
+      });
+      await Promise.all(promises);
+  };
+
+  // Upload concurrently
+  await Promise.all([
+      uploadCollection('users', getUsers()),
+      uploadCollection('batches', getBatches()),
+      uploadCollection('orders', getOrders())
+  ]);
+  
+  console.log("✅ Sincronización de fondo completada.");
 };
 
 export const initCloudSync = async () => {
   const config = getConfig();
   
-  // Clean up previous listeners if any
   unsubscribers.forEach(unsub => unsub());
   unsubscribers = [];
 
@@ -89,45 +122,29 @@ export const initCloudSync = async () => {
     try {
       let app;
       
-      // CRITICAL FIX: Check if app is already initialized to prevent crash
       if (!getApps().length) {
           app = initializeApp(config.firebaseConfig);
-          // Initialize Firestore with Offline Persistence enabled only on first init
           db = initializeFirestore(app, {
               cacheSizeBytes: CACHE_SIZE_UNLIMITED
           });
       } else {
-          app = getApp();
+          app = getApp(); 
           db = getFirestore(app);
       }
 
       try {
-          // Attempt to enable persistence only if not already enabled/failed
-          await enableIndexedDbPersistence(db).catch((err) => {
-             if (err.code === 'failed-precondition') {
-                 // Multiple tabs open, persistence can only be enabled in one tab at a a time.
-                 console.warn("Persistencia offline desactivada (Múltiples pestañas abiertas).");
-             } else if (err.code === 'unimplemented') {
-                 // The current browser does not support all of the features required to enable persistence
-                 console.warn("Navegador no soporta persistencia offline.");
-             }
-          });
-          console.log("💾 Base de datos lista.");
-      } catch (err: any) {
-          // Ignore persistence errors, continue with online mode
-      }
+          await enableIndexedDbPersistence(db).catch(() => {});
+      } catch (err) {}
 
-      console.log("☁️ Nube conectada: Sincronizando datos...");
+      console.log("☁️ Conectado. Iniciando listeners...");
       
-      // 1. Upload Local Data FIRST to ensure other devices see what we have
-      await uploadLocalToCloud();
+      // Upload local data in background (doesn't block UI)
+      uploadLocalToCloud();
 
-      // 2. Start Listening for changes
       startListeners();
 
     } catch (e) {
-      console.error("Error FATAL al conectar con Firebase:", e);
-      // Optional: alert the user via UI if needed, but don't crash the app
+      console.error("Error al conectar con Firebase:", e);
     }
   }
 };
@@ -148,27 +165,13 @@ const startListeners = () => {
           const currentLocal = safeParse(storageKey, []);
           const remoteIds = new Set(remoteData.map(d => d.id));
           
-          // Keep items created locally that haven't synced yet (though uploadLocalToCloud handles most)
+          // Merge logic: Keep local items not yet in cloud
           const pendingUploadItems = currentLocal.filter((localItem: any) => {
               if (remoteIds.has(localItem.id)) return false;
-              
-              let timestamp = localItem.createdAt || localItem.timestamp;
-              if (!timestamp && localItem.id && !isNaN(Number(localItem.id))) {
-                  timestamp = Number(localItem.id);
-              }
-
-              if (timestamp) {
-                  const now = Date.now();
-                  // Keep local items created in the last 7 days if they aren't on cloud yet
-                  if ((now - timestamp) < 604800000) { 
-                      return true; 
-                  }
-              }
-              return false; 
+              return true; 
           });
 
           const mergedData = [...remoteData, ...pendingUploadItems];
-          // Deduplicate by ID favoring remote data
           const uniqueData = Array.from(new Map(mergedData.map(item => [item.id, item])).values());
 
           if (uniqueData.length > 0 || snapshot.empty) {
@@ -180,9 +183,6 @@ const startListeners = () => {
         unsubscribers.push(unsub);
     } catch(e: any) {
         console.error(`Error setting up listener for ${colName}:`, e);
-        if (e.code === 'permission-denied') {
-            alert("⚠️ ERROR DE PERMISOS: No se pueden leer los datos.\n\nPor favor ve a Firebase Console -> Firestore Database -> Reglas y configúralas en modo 'test' (allow read, write: if true;)");
-        }
     }
   };
 
