@@ -68,15 +68,21 @@ const Collections: React.FC = () => {
         note: 'Abono Manual'
     });
     
+    // Calculate new balance based on the updated order
     const bal = calculateBalance(updatedOrder);
-    if (bal.balance - amount <= 0.1) updatedOrder.paymentStatus = 'PAID';
+    
+    // If the remaining balance is effectively zero, mark as PAID
+    if (bal.balance <= 0.1) {
+        updatedOrder.paymentStatus = 'PAID';
+    }
 
     saveOrder(updatedOrder);
     refresh(); 
     setSelectedOrder(null);
     setPayAmount('');
     
-    generateReceipt(updatedOrder, amount, bal.balance - amount);
+    // Generate receipt for this specific payment (original balance before this pay - amount)
+    generateReceipt(updatedOrder, amount, bal.balance);
   };
 
   const generateReceipt = (order: ClientOrder, amountPaid: number, remaining: number) => {

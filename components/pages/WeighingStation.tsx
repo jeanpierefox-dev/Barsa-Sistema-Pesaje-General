@@ -315,9 +315,7 @@ const WeighingStation: React.FC = () => {
     doc.text(totalPay.toFixed(2), 76, y, { align: 'right' });
     y += 10;
 
-    // CHANGED: Logic to show Payment Status correctly on ticket
-    // If it's PAID (Cash or Completed Credit), show CANCELADO
-    // If it's CREDIT (and not paid), show CREDITO
+    // Logic to show Payment Status correctly on ticket
     if (activeOrder.paymentStatus === 'PAID') {
          doc.setFontSize(16);
          doc.setTextColor(150);
@@ -339,8 +337,6 @@ const WeighingStation: React.FC = () => {
     const totalCost = weightToPay * pricePerKg; 
 
     // LOGIC FIX FOR CREDIT:
-    // If CASH: Default amount is totalCost.
-    // If CREDIT: Default amount is 0 (User must type if they want to pay partial).
     let amountToRecord = 0;
     
     if (payAmount !== '') {
@@ -362,8 +358,7 @@ const WeighingStation: React.FC = () => {
         });
     }
 
-    // Determine status. If Full Paid -> PAID. Else -> PENDING.
-    // Note: Floating point comparison tolerance
+    // Determine status
     const totalPaidSoFar = newPayments.reduce((acc, p) => acc + p.amount, 0);
     const isFullyPaid = (totalCost - totalPaidSoFar) <= 0.1;
 
@@ -572,6 +567,7 @@ const WeighingStation: React.FC = () => {
                                 <th className="p-2 text-left">Hora</th>
                                 <th className="p-2 text-center">Cant.</th>
                                 <th className="p-2 text-right">Peso</th>
+                                <th className="p-2 text-center w-8"></th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -580,6 +576,13 @@ const WeighingStation: React.FC = () => {
                                     <td className="p-2 text-slate-600 font-mono">{new Date(r.timestamp).toLocaleTimeString()}</td>
                                     <td className="p-2 text-center font-bold text-slate-700">{r.quantity}</td>
                                     <td className="p-2 text-right font-bold text-slate-900 font-mono">{r.weight.toFixed(2)}</td>
+                                    <td className="p-2 text-center">
+                                        {activeOrder?.status !== 'CLOSED' && (
+                                            <button onClick={() => deleteRecord(r.id)} className="text-red-400 hover:text-red-600 hover:bg-red-50 rounded p-1">
+                                                <Trash2 size={14}/>
+                                            </button>
+                                        )}
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>
@@ -1015,7 +1018,7 @@ const WeighingStation: React.FC = () => {
                                    <span className="text-slate-400 font-bold text-xs bg-slate-100 px-2 py-0.5 rounded">x{r.quantity}</span>
                                </div>
                                {!isLocked && (
-                                   <button onClick={() => deleteRecord(r.id)} className="bg-red-50 text-red-400 hover:bg-red-500 hover:text-white p-1.5 rounded-lg transition-all shadow-sm flex items-center justify-center">
+                                   <button onClick={() => deleteRecord(r.id)} className="bg-red-100 text-red-600 hover:bg-red-600 hover:text-white p-1.5 rounded-lg transition-all shadow-sm flex items-center justify-center">
                                        <Trash2 size={16} />
                                    </button>
                                )}
