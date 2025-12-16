@@ -1,7 +1,7 @@
 import React, { useState, useContext, useEffect } from 'react';
 import { AppConfig, UserRole } from '../../types';
-import { getConfig, saveConfig, resetApp, isFirebaseConfigured } from '../../services/storage';
-import { Printer, Save, Check, AlertTriangle, Bluetooth, Link2, MonitorCheck, Database, Cloud, CloudOff, Copy, Download, Upload } from 'lucide-react';
+import { getConfig, saveConfig, resetApp, isFirebaseConfigured, restoreBackup } from '../../services/storage';
+import { Printer, Save, Check, AlertTriangle, Bluetooth, Link2, MonitorCheck, Database, Cloud, CloudOff, Copy, Download, Upload, HardDriveDownload, HardDriveUpload } from 'lucide-react';
 import { AuthContext } from '../../App';
 
 const Configuration: React.FC = () => {
@@ -12,6 +12,10 @@ const Configuration: React.FC = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [importString, setImportString] = useState('');
   const [showImport, setShowImport] = useState(false);
+  
+  // Backup State
+  const [showBackupInput, setShowBackupInput] = useState(false);
+  const [backupString, setBackupString] = useState('');
 
   useEffect(() => {
       setIsConnected(isFirebaseConfigured());
@@ -78,6 +82,41 @@ const Configuration: React.FC = () => {
           }
       } catch (e) {
           alert("Error al leer el código. Asegúrate de copiar todo el texto JSON.");
+      }
+  };
+
+  // --- NEW BACKUP LOGIC ---
+  const handleDownloadBackup = () => {
+      const data = {
+          users: localStorage.getItem('avi_users'),
+          batches: localStorage.getItem('avi_batches'),
+          orders: localStorage.getItem('avi_orders'),
+          config: localStorage.getItem('avi_config'),
+          backupDate: new Date().toISOString()
+      };
+      const jsonStr = JSON.stringify(data, null, 2);
+      
+      const blob = new Blob([jsonStr], {type : 'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `RESPALDO_AVICOLA_${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+  };
+
+  const handleRestoreBackup = () => {
+      try {
+          const parsed = JSON.parse(backupString);
+          if (parsed.users && parsed.config) {
+              if (confirm("¡ATENCIÓN! Esto SOBRESCRIBIRÁ todos los datos actuales con los del archivo de respaldo.\n\n¿Desea continuar?")) {
+                  restoreBackup(parsed);
+              }
+          } else {
+              alert("El archivo de respaldo no es válido o está incompleto.");
+          }
+      } catch (e) {
+          alert("Error de formato JSON. Asegúrese de copiar el contenido completo del archivo.");
       }
   };
 
@@ -243,6 +282,48 @@ const Configuration: React.FC = () => {
                     </div>
                 </div>
             </div>
+        )}
+        
+        {/* DATA BACKUP SECTION */}
+        {user?.role === UserRole.ADMIN && (
+             <div className="border-t border-gray-200 pt-6">
+                 <h3 className="font-bold text-lg text-gray-900 mb-4 flex items-center"><HardDriveDownload className="mr-2"/> Respaldo de Datos (Seguridad)</h3>
+                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
+                     <p className="text-sm text-amber-800 mb-4 font-medium">
+                         Descargue una copia de seguridad de TODOS sus datos locales para evitar pérdidas por cambios de dispositivo o limpieza de caché.
+                     </p>
+                     
+                     <div className="flex flex-col md:flex-row gap-4">
+                         <button 
+                             onClick={handleDownloadBackup}
+                             className="flex-1 bg-white border-2 border-amber-200 text-amber-800 px-4 py-3 rounded-xl font-bold flex items-center justify-center hover:bg-amber-100 shadow-sm transition-all"
+                         >
+                             <Download size={20} className="mr-2"/> DESCARGAR RESPALDO
+                         </button>
+                         <button 
+                             onClick={() => setShowBackupInput(!showBackupInput)}
+                             className="flex-1 bg-white border-2 border-slate-300 text-slate-700 px-4 py-3 rounded-xl font-bold flex items-center justify-center hover:bg-slate-50 shadow-sm transition-all"
+                         >
+                             <Upload size={20} className="mr-2"/> RESTAURAR RESPALDO
+                         </button>
+                     </div>
+
+                     {showBackupInput && (
+                         <div className="mt-4 animate-fade-in bg-white p-4 rounded-xl border border-amber-200">
+                             <label className="block text-xs font-bold text-slate-500 mb-2">Pegue aquí el contenido del archivo JSON de respaldo:</label>
+                             <textarea 
+                                 value={backupString}
+                                 onChange={e => setBackupString(e.target.value)}
+                                 className="w-full h-32 p-3 text-xs font-mono border-2 border-slate-200 rounded-lg focus:border-amber-500 outline-none bg-slate-50"
+                                 placeholder='{ "users": "...", "orders": "..." }'
+                             />
+                             <button onClick={handleRestoreBackup} className="mt-2 bg-amber-600 text-white px-4 py-3 rounded-lg text-sm font-bold w-full hover:bg-amber-700 shadow-md">
+                                 <HardDriveUpload size={18} className="inline mr-2"/> CONFIRMAR RESTAURACIÓN
+                             </button>
+                         </div>
+                     )}
+                 </div>
+             </div>
         )}
 
         <div className="flex justify-between items-center pt-8 mt-8 border-t border-gray-200">

@@ -81,9 +81,16 @@ const App = () => {
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
-    // 1. Check Login
+    // 1. Check Login with Safe Parse
     const saved = localStorage.getItem('avi_session');
-    if (saved) setUser(JSON.parse(saved));
+    if (saved) {
+        try {
+            setUser(JSON.parse(saved));
+        } catch (e) {
+            console.error("Session corrupted, clearing");
+            localStorage.removeItem('avi_session');
+        }
+    }
 
     // 2. Initialize Cloud
     if (isFirebaseConfigured()) {

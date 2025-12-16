@@ -411,9 +411,10 @@ const WeighingStation: React.FC = () => {
     const date = new Date().toLocaleString();
     const batchInfo = batchId ? getBatches().find(b => b.id === batchId)?.name : 'N/A';
     
-    // Styles
-    const primaryColor = [23, 37, 84]; // Navy Blue (#172554)
-    const secondaryColor = [241, 245, 249]; // Slate 100
+    // Styles & Colors
+    const blueColor = [23, 37, 84]; // Navy Blue
+    const orangeColor = [194, 65, 12]; // Orange
+    const redColor = [185, 28, 28]; // Red
     
     // --- HEADER ---
     if (logo) {
@@ -422,7 +423,7 @@ const WeighingStation: React.FC = () => {
     
     doc.setFont("helvetica", "bold");
     doc.setFontSize(18);
-    doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+    doc.setTextColor(blueColor[0], blueColor[1], blueColor[2]);
     doc.text(company.toUpperCase(), 105, 18, { align: 'center' });
     
     doc.setFontSize(10);
@@ -434,8 +435,8 @@ const WeighingStation: React.FC = () => {
     autoTable(doc, {
         startY: 35,
         theme: 'plain',
-        styles: { fontSize: 10, cellPadding: 1 },
-        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 25 }, 1: { cellWidth: 70 }, 2: { fontStyle: 'bold', cellWidth: 25 } },
+        styles: { fontSize: 9, cellPadding: 1 },
+        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 30 }, 1: { cellWidth: 70 }, 2: { fontStyle: 'bold', cellWidth: 30 } },
         body: [
             ['Cliente:', activeOrder.clientName, 'Fecha:', date],
             ['Lote/Ref:', batchInfo || 'Venta Directa', 'Operador:', user?.name || 'Admin'],
@@ -443,26 +444,23 @@ const WeighingStation: React.FC = () => {
         ]
     });
 
-    // --- EXECUTIVE SUMMARY ---
+    // --- EXECUTIVE SUMMARY (Horizontal) ---
     autoTable(doc, {
-        startY: (doc as any).lastAutoTable.finalY + 5,
+        startY: (doc as any).lastAutoTable.finalY + 6,
         theme: 'grid',
-        headStyles: { fillColor: primaryColor, textColor: 255, fontStyle: 'bold', halign: 'center' },
+        headStyles: { fillColor: blueColor, textColor: 255, fontStyle: 'bold', halign: 'center', fontSize: 9 },
+        styles: { fontSize: 9, cellPadding: 1.5, halign: 'center' },
         columnStyles: { 
-            0: { cellWidth: 60, fontStyle: 'bold' }, 
-            1: { halign: 'center' }, 
-            2: { halign: 'right' } 
+            0: { fontStyle: 'bold' }, 
+            3: { fontStyle: 'bold', textColor: blueColor }
         },
-        head: [['CONCEPTO', 'CANTIDAD (Und/Jabas)', 'PESO TOTAL (kg)']],
+        head: [['JABAS LLENAS (Bruto)', 'JABAS VACÍAS (Tara)', 'MERMA (Kg)', 'PESO NETO (Kg)']],
         body: [
-            ['JABAS LLENAS (Bruto)', totals.fullCratesCount, totals.totalFullWeight.toFixed(2)],
-            ['JABAS VACÍAS (Tara)', totals.emptyCratesCount, totals.totalEmptyWeight.toFixed(2)],
-            ['MERMA / MORTALIDAD', totals.mortCount, totals.totalMortWeight.toFixed(2)],
-            [{ content: '', colSpan: 3, styles: { cellPadding: 1, fillColor: [255, 255, 255] } }],
             [
-                { content: 'PESO NETO TOTAL', styles: { fontSize: 12, textColor: primaryColor, fillColor: secondaryColor } },
-                { content: totals.estimatedChickens > 0 ? `${totals.estimatedChickens} Aves (Est.)` : '-', styles: { halign: 'center', fontSize: 10, fillColor: secondaryColor } },
-                { content: totals.netWeight.toFixed(2), styles: { fontSize: 14, fontStyle: 'bold', halign: 'right', textColor: primaryColor, fillColor: secondaryColor } }
+                `${totals.fullCratesCount} und | ${totals.totalFullWeight.toFixed(2)} kg`,
+                `${totals.emptyCratesCount} und | ${totals.totalEmptyWeight.toFixed(2)} kg`,
+                `${totals.mortCount} und | ${totals.totalMortWeight.toFixed(2)} kg`,
+                totals.netWeight.toFixed(2)
             ]
         ]
     });
@@ -470,11 +468,11 @@ const WeighingStation: React.FC = () => {
     const summaryY = (doc as any).lastAutoTable.finalY + 10;
     
     doc.setFontSize(11);
-    doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+    doc.setTextColor(blueColor[0], blueColor[1], blueColor[2]);
     doc.setFont("helvetica", "bold");
     doc.text("DETALLE DE MOVIMIENTOS", 14, summaryY);
     
-    // --- DETAIL TABLES ---
+    // --- SIDE-BY-SIDE TABLES LOGIC (COMPACT) ---
     const getTableData = (type: 'FULL' | 'EMPTY' | 'MORTALITY') => {
         return activeOrder.records
             .filter(r => r.type === type)
@@ -489,72 +487,110 @@ const WeighingStation: React.FC = () => {
     const fullData = getTableData('FULL');
     const emptyData = getTableData('EMPTY');
     const mortData = getTableData('MORTALITY');
+
+    // Add Totals Row to Data
+    if (fullData.length > 0) fullData.push(['TOT', totals.fullCratesCount, totals.totalFullWeight.toFixed(2)]);
+    if (emptyData.length > 0) emptyData.push(['TOT', totals.emptyCratesCount, totals.totalEmptyWeight.toFixed(2)]);
     
     let currentY = summaryY + 5;
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const margin = 14;
-    const gutter = 10;
-    const tableWidth = (pageWidth - (margin * 2) - gutter) / 2;
+    
+    // ADJUST DIMENSIONS FOR COMPACT 2-COLUMN LAYOUT
+    const pageWidth = doc.internal.pageSize.getWidth(); // ~210mm
+    const margin = 12; // 12mm Margin
+    const gutter = 6;  // 6mm Gutter
+    const availableWidth = pageWidth - (margin * 2);
+    const tableWidth = (availableWidth - gutter) / 2;
 
-    // Table: Jabas Llenas (Left Side)
+    let finalYFull = currentY;
+    let finalYEmpty = currentY;
+
+    // --- LEFT TABLE: JABAS LLENAS ---
     if (fullData.length > 0) {
         autoTable(doc, {
             startY: currentY,
-            head: [['#', 'Llenas', 'Peso (kg)']],
+            head: [['#', 'Cant.', 'Peso (kg)']],
             body: fullData,
-            theme: 'striped',
-            headStyles: { fillColor: [30, 58, 138], halign: 'center' }, // Dark Blue
-            styles: { fontSize: 8, halign: 'center' },
-            columnStyles: { 2: { halign: 'right', fontStyle: 'bold' } },
+            theme: 'grid',
+            headStyles: { fillColor: blueColor, halign: 'center', fontSize: 8 },
+            styles: { fontSize: 7, halign: 'center', cellPadding: 1 }, // COMPACT FONT & PADDING
+            columnStyles: { 
+                0: { cellWidth: 8 }, 
+                1: { cellWidth: 15, fontStyle: 'bold' },
+                2: { halign: 'right' } 
+            },
             margin: { left: margin },
-            tableWidth: tableWidth
+            tableWidth: tableWidth,
+            didParseCell: function(data) {
+                if (data.section === 'body' && data.row.index === fullData.length - 1) {
+                    data.cell.styles.fontStyle = 'bold';
+                    data.cell.styles.fillColor = [241, 245, 249];
+                }
+            }
         });
+        finalYFull = (doc as any).lastAutoTable.finalY;
     }
 
-    // Table: Jabas Vacias (Right Side)
-    // We check if FullData table exists to align top, otherwise use currentY
-    const finalYFull = (doc as any).lastAutoTable.finalY || currentY;
-    
+    // --- RIGHT TABLE: JABAS VACIAS ---
     if (emptyData.length > 0) {
         autoTable(doc, {
-            startY: currentY,
-            head: [['#', 'Vacías', 'Peso (kg)']],
+            startY: currentY, // Align top with Left Table
+            head: [['#', 'Cant.', 'Peso (kg)']],
             body: emptyData,
-            theme: 'striped',
-            headStyles: { fillColor: [194, 65, 12], halign: 'center' }, // Orange
-            styles: { fontSize: 8, halign: 'center' },
-            columnStyles: { 2: { halign: 'right', fontStyle: 'bold' } },
-            margin: { left: margin + tableWidth + gutter },
-            tableWidth: tableWidth
+            theme: 'grid',
+            headStyles: { fillColor: orangeColor, halign: 'center', fontSize: 8 },
+            styles: { fontSize: 7, halign: 'center', cellPadding: 1 }, // COMPACT FONT & PADDING
+            columnStyles: { 
+                0: { cellWidth: 8 }, 
+                1: { cellWidth: 15, fontStyle: 'bold' },
+                2: { halign: 'right' } 
+            },
+            margin: { left: margin + tableWidth + gutter }, // Offset to right column
+            tableWidth: tableWidth,
+            didParseCell: function(data) {
+                if (data.section === 'body' && data.row.index === emptyData.length - 1) {
+                    data.cell.styles.fontStyle = 'bold';
+                    data.cell.styles.fillColor = [255, 237, 213];
+                }
+            }
         });
+        finalYEmpty = (doc as any).lastAutoTable.finalY;
     }
-
-    const finalYEmpty = (doc as any).lastAutoTable.finalY || currentY;
     
-    // Mortality Table (Bottom, full width)
+    // --- BOTTOM TABLE: MORTALITY ---
     if (mortData.length > 0) {
-        const nextY = Math.max(finalYFull, finalYEmpty) + 10;
+        // Position below the longest table
+        const nextY = Math.max(finalYFull, finalYEmpty) + 8;
         
-        // Check if page break needed
-        if (nextY > 250) {
+        // Check Page Break
+        if (nextY > 260) {
              doc.addPage();
              currentY = 20;
         } else {
              currentY = nextY;
         }
 
-        doc.setFontSize(10);
-        doc.setTextColor(185, 28, 28);
-        doc.text("Registro de Merma / Mortalidad", 14, currentY - 2);
+        doc.setFontSize(9);
+        doc.setTextColor(redColor[0], redColor[1], redColor[2]);
+        doc.setFont("helvetica", "bold");
+        doc.text("Registro de Merma / Mortalidad", margin, currentY - 2);
+
+        mortData.push(['TOT', totals.mortCount, totals.totalMortWeight.toFixed(2)]);
 
         autoTable(doc, {
             startY: currentY,
             head: [['#', 'Cantidad Aves', 'Peso (kg)']],
             body: mortData,
             theme: 'striped',
-            headStyles: { fillColor: [185, 28, 28], halign: 'center' }, // Red
-            styles: { fontSize: 9, halign: 'center' },
-            columnStyles: { 2: { halign: 'right', fontStyle: 'bold' } }
+            headStyles: { fillColor: redColor, halign: 'center', fontSize: 8 },
+            styles: { fontSize: 7, halign: 'center', cellPadding: 1 }, // COMPACT
+            columnStyles: { 2: { halign: 'right', fontStyle: 'bold' } },
+            margin: { left: margin, right: margin },
+            tableWidth: 'auto', // Auto fill available width
+            didParseCell: function(data) {
+                if (data.section === 'body' && data.row.index === mortData.length - 1) {
+                    data.cell.styles.fontStyle = 'bold';
+                }
+            }
         });
     }
 

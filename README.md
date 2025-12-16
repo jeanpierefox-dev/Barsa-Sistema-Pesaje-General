@@ -1,20 +1,22 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Sistema AviControl Pro
 
-# Run and deploy your AI Studio app
+Sistema integral de control avícola desarrollado con React, Vite y Firebase.
 
-This contains everything you need to run your app locally.
+## Características
 
-View your app in AI Studio: https://ai.studio/apps/drive/1xT_AdMhDdfRLOT__LjomleFmBq7NELh6
+- **Gestión de Lotes:** Control de campañas de producción.
+- **Pesaje en Tiempo Real:** Interfaz optimizada para pantallas táctiles y teclado.
+- **Facturación y Cobranza:** Generación de tickets PDF y control de créditos.
+- **Sincronización en la Nube:** Soporte para Firebase con persistencia offline (el sistema funciona sin internet y sincroniza al reconectar).
+- **Reportes:** Exportación de reportes corporativos en PDF.
 
-## Run Locally
+## Instalación
 
-**Prerequisites:**  Node.js
+1.  `npm install`
+2.  `npm run dev` para desarrollo.
+3.  `npm run build` para producción.
 
+## Despliegue en Vercel
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+Este proyecto está configurado para desplegarse fácilmente en Vercel.
+Solo conecta tu repositorio y Vercel detectará la configuración de Vite automáticamente.

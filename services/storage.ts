@@ -10,6 +10,18 @@ const KEYS = {
   SESSION: 'avi_session'
 };
 
+// --- Helper: Safe Parse ---
+// Prevents white screen if localStorage contains garbage data
+const safeParse = (key: string, fallback: any) => {
+    try {
+        const item = localStorage.getItem(key);
+        return item ? JSON.parse(item) : fallback;
+    } catch (e) {
+        console.warn(`Data corruption detected in ${key}. Resetting to default.`);
+        return fallback;
+    }
+};
+
 // --- Firebase Initialization ---
 let db: any = null;
 let unsubscribers: Function[] = [];
@@ -26,14 +38,13 @@ export const initCloudSync = async () => {
       const app = initializeApp(config.firebaseConfig);
       
       // Initialize Firestore with Offline Persistence enabled
-      // This is crucial for mobile devices with flaky connections
       db = initializeFirestore(app, {
           cacheSizeBytes: CACHE_SIZE_UNLIMITED
       });
 
       try {
           await enableIndexedDbPersistence(db);
-          console.log("💾 Persistencia Offline Activada");
+          console.log("💾 Persistencia Offline Activada: Los datos están seguros.");
       } catch (err: any) {
           if (err.code == 'failed-precondition') {
               console.warn("Persistencia falló: Múltiples pestañas abiertas.");
@@ -53,7 +64,6 @@ export const initCloudSync = async () => {
 const startListeners = () => {
   if (!db) return;
 
-  // Helper to sync collection to localStorage with "Smart Merge"
   const syncCollection = (colName: string, storageKey: string, eventName: string) => {
     const q = collection(db, colName);
     
@@ -63,48 +73,29 @@ const startListeners = () => {
         remoteData.push(doc.data());
       });
       
-      // SMART MERGE LOGIC (Crucial for Mobile/Offline)
-      // We don't just overwrite localStorage with remoteData.
-      // We check if we have LOCAL items that are NOT in remote yet (pending upload).
-      // If we blindly overwrite, we lose items created while offline/bad signal.
-      
-      const currentLocal = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      const currentLocal = safeParse(storageKey, []);
       const remoteIds = new Set(remoteData.map(d => d.id));
       
       const pendingUploadItems = currentLocal.filter((localItem: any) => {
-          // If it's already in remote, we use the remote version (it updates automatically below)
           if (remoteIds.has(localItem.id)) return false;
-
-          // Item is in Local but NOT in Remote.
-          // Is it a brand new item? (Created < 1 hour ago)
-          // We assume missing items created recently are "Pending Upload", not "Deleted by Admin".
           
           let timestamp = localItem.createdAt || localItem.timestamp;
-          
-          // Fallback: Try to parse ID if it's timestamp-based (which our app uses: Date.now().toString())
           if (!timestamp && localItem.id && !isNaN(Number(localItem.id))) {
               timestamp = Number(localItem.id);
           }
 
           if (timestamp) {
               const now = Date.now();
-              // Keep local item if created less than 1 hour ago.
-              // This gives ample time for mobile to reconnect and upload.
-              if ((now - timestamp) < 3600000) { 
+              if ((now - timestamp) < 604800000) { 
                   return true; 
               }
           }
-          
-          return false; // Old item not in remote? It was likely deleted legitimately. Let it go.
+          return false; 
       });
 
-      // Merge: Remote Data (Source of Truth) + Pending Local Items
       const mergedData = [...remoteData, ...pendingUploadItems];
-      
-      // Remove duplicates by ID (Remote takes precedence)
       const uniqueData = Array.from(new Map(mergedData.map(item => [item.id, item])).values());
 
-      // Only update if we have data or if it's a deliberate clear
       if (uniqueData.length > 0 || snapshot.empty) {
         localStorage.setItem(storageKey, JSON.stringify(uniqueData));
         window.dispatchEvent(new Event(eventName));
@@ -122,7 +113,7 @@ const startListeners = () => {
 // --- Initialization ---
 
 const seedData = () => {
-  if (!localStorage.getItem(KEYS.USERS)) {
+  if (localStorage.getItem(KEYS.USERS) === null) {
     const admin: User = {
       id: 'admin-1',
       username: 'admin',
@@ -132,7 +123,7 @@ const seedData = () => {
     };
     localStorage.setItem(KEYS.USERS, JSON.stringify([admin]));
   }
-  if (!localStorage.getItem(KEYS.CONFIG)) {
+  if (localStorage.getItem(KEYS.CONFIG) === null) {
     const config: AppConfig = {
       companyName: 'Avícola Demo',
       logoUrl: '',
@@ -154,8 +145,6 @@ const writeToCloud = async (collectionName: string, data: any) => {
       await setDoc(doc(db, collectionName, data.id), data);
     } catch (e) {
       console.error(`Error writing ${collectionName} to cloud:`, e);
-      // NOTE: We do not need to retry manually. 
-      // Firestore SDK automatically queues writes when offline and syncs when online.
     }
   }
 };
@@ -172,7 +161,7 @@ const deleteFromCloud = async (collectionName: string, id: string) => {
 
 // --- Users ---
 
-export const getUsers = (): User[] => JSON.parse(localStorage.getItem(KEYS.USERS) || '[]');
+export const getUsers = (): User[] => safeParse(KEYS.USERS, []);
 
 export const saveUser = (user: User) => {
   const users = getUsers();
@@ -196,7 +185,7 @@ export const login = (u: string, p: string): User | null => {
 
 // --- Batches ---
 
-export const getBatches = (): Batch[] => JSON.parse(localStorage.getItem(KEYS.BATCHES) || '[]');
+export const getBatches = (): Batch[] => safeParse(KEYS.BATCHES, []);
 
 export const saveBatch = (batch: Batch) => {
   const batches = getBatches();
@@ -215,7 +204,7 @@ export const deleteBatch = (id: string) => {
 
 // --- Orders/Weighings ---
 
-export const getOrders = (): ClientOrder[] => JSON.parse(localStorage.getItem(KEYS.ORDERS) || '[]');
+export const getOrders = (): ClientOrder[] => safeParse(KEYS.ORDERS, []);
 
 export const saveOrder = (order: ClientOrder) => {
   const orders = getOrders();
@@ -230,10 +219,9 @@ export const getOrdersByBatch = (batchId: string) => getOrders().filter(o => o.b
 
 // --- Config ---
 
-export const getConfig = (): AppConfig => JSON.parse(localStorage.getItem(KEYS.CONFIG) || '{}');
+export const getConfig = (): AppConfig => safeParse(KEYS.CONFIG, {});
 export const saveConfig = (cfg: AppConfig) => {
   localStorage.setItem(KEYS.CONFIG, JSON.stringify(cfg));
-  // If config changes, try to re-init cloud
   if (cfg.firebaseConfig?.apiKey) {
     initCloudSync();
   }
@@ -242,6 +230,15 @@ export const saveConfig = (cfg: AppConfig) => {
 export const isFirebaseConfigured = (): boolean => {
   const c = getConfig();
   return !!(c.firebaseConfig?.apiKey && c.firebaseConfig?.projectId);
+};
+
+// New Helper: Import Full Backup
+export const restoreBackup = (data: any) => {
+    if (data.users) localStorage.setItem(KEYS.USERS, data.users);
+    if (data.batches) localStorage.setItem(KEYS.BATCHES, data.batches);
+    if (data.orders) localStorage.setItem(KEYS.ORDERS, data.orders);
+    if (data.config) localStorage.setItem(KEYS.CONFIG, data.config);
+    window.location.reload();
 };
 
 export const resetApp = () => {
