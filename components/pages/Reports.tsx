@@ -56,6 +56,7 @@ const Reports: React.FC = () => {
       const company = config.companyName || 'SISTEMA BARSA';
       const logo = config.logoUrl;
       const primaryColor = [23, 37, 84]; // Navy Blue
+      const accentColor = [22, 163, 74]; // Green
 
       // 1. Header
       if (logo) {
@@ -70,56 +71,35 @@ const Reports: React.FC = () => {
       doc.setFontSize(10);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(100);
-      doc.text("REPORTE DE LOTE DE PRODUCCIÓN", 105, 24, { align: 'center' });
+      doc.text("REPORTE INTEGRAL DE LOTE", 105, 24, { align: 'center' });
+      doc.text(`Lote: ${batchName} | Fecha: ${new Date().toLocaleDateString()}`, 105, 29, { align: 'center' });
 
-      // 2. Info Grid
+      // --- SECTION 1: GENERAL WEIGHT SUMMARY (CUADRO PRINCIPAL) ---
       autoTable(doc, {
         startY: 35,
-        theme: 'plain',
-        styles: { fontSize: 10, cellPadding: 1 },
-        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 30 }, 1: { cellWidth: 70 } },
-        body: [
-            ['Lote:', batchName, 'Clientes:', stats.orderCount],
-            ['Fecha Emisión:', new Date().toLocaleDateString(), 'Hora:', new Date().toLocaleTimeString()],
-        ]
-      });
-
-      // 3. Executive Summary (Weights)
-      autoTable(doc, {
-        startY: (doc as any).lastAutoTable.finalY + 5,
         theme: 'grid',
-        headStyles: { fillColor: primaryColor, textColor: 255, fontStyle: 'bold', halign: 'center' },
-        columnStyles: { 0: { fontStyle: 'bold' }, 1: { halign: 'right' } },
-        head: [['CONCEPTO', 'PESO TOTAL (kg)']],
+        headStyles: { fillColor: primaryColor, textColor: 255, fontStyle: 'bold', halign: 'center', fontSize: 11 },
+        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 80 }, 1: { halign: 'right', fontSize: 11 } },
+        head: [['BALANCE DE MASA - TOTAL LOTE', 'PESO (kg)']],
         body: [
-            ['Peso Bruto Total (Llenas)', stats.totalFull.toFixed(2)],
-            ['Peso Tara Total (Vacías)', stats.totalEmpty.toFixed(2)],
-            ['Merma Total', stats.totalMort.toFixed(2)],
-            [{ content: 'PESO NETO TOTAL', styles: { fontStyle: 'bold', fillColor: [241, 245, 249] } }, { content: stats.totalNet.toFixed(2), styles: { fontStyle: 'bold', fontSize: 12, fillColor: [241, 245, 249] } }]
+            ['PESO BRUTO TOTAL (Llenas)', stats.totalFull.toFixed(2)],
+            ['PESO TARA TOTAL (Vacías)', stats.totalEmpty.toFixed(2)],
+            ['MERMA TOTAL', stats.totalMort.toFixed(2)],
+            [{ content: 'PESO NETO TOTAL', styles: { fillColor: [240, 253, 244], textColor: accentColor } }, { content: stats.totalNet.toFixed(2), styles: { fillColor: [240, 253, 244], textColor: accentColor, fontStyle: 'bold' } }]
         ]
       });
 
-      doc.text("Detalle de Clientes (Pesos)", 14, (doc as any).lastAutoTable.finalY + 10);
+      // --- SECTION 2: PHYSICAL DETAILS PER CLIENT ---
+      doc.setFontSize(11);
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.text("1. DETALLE DE PRODUCCIÓN (PESOS)", 14, (doc as any).lastAutoTable.finalY + 10);
 
-      // 4. Client List Table (ONLY WEIGHTS)
-      // Calculate Financials for Summary while iterating
-      let totalSoldMoney = 0;
-      let totalPaidMoney = 0;
-
-      const tableData = stats.batchOrders.map((o: ClientOrder, index: number) => {
+      const physicalData = stats.batchOrders.map((o: ClientOrder, index: number) => {
           const wFull = o.records.filter(r => r.type === 'FULL').reduce((a, b) => a + b.weight, 0);
           const wEmpty = o.records.filter(r => r.type === 'EMPTY').reduce((a, b) => a + b.weight, 0);
           const wMort = o.records.filter(r => r.type === 'MORTALITY').reduce((a, b) => a + b.weight, 0);
-          
           let net = wFull - wEmpty - wMort;
           if (o.weighingMode === WeighingType.SOLO_POLLO) net = wFull;
-
-          // Financial Calcs
-          const saleAmount = net * o.pricePerKg;
-          const paidAmount = o.payments.reduce((a,b)=>a+b.amount, 0);
-          
-          totalSoldMoney += saleAmount;
-          totalPaidMoney += paidAmount;
 
           return [
               index + 1, 
@@ -134,9 +114,9 @@ const Reports: React.FC = () => {
       autoTable(doc, {
           startY: (doc as any).lastAutoTable.finalY + 12,
           head: [['#', 'Cliente', 'Bruto', 'Tara', 'Merma', 'Neto']],
-          body: tableData,
+          body: physicalData,
           theme: 'striped',
-          headStyles: { fillColor: primaryColor },
+          headStyles: { fillColor: [71, 85, 105], halign: 'center' }, // Slate Header
           columnStyles: {
               0: { halign: 'center', cellWidth: 10 },
               2: { halign: 'right' },
@@ -145,36 +125,82 @@ const Reports: React.FC = () => {
               5: { halign: 'right', fontStyle: 'bold' }
           }
       });
-      
-      const pendingMoney = totalSoldMoney - totalPaidMoney;
 
-      // 5. Financial Summary at the bottom
-      const finalY = (doc as any).lastAutoTable.finalY;
-      
+      // --- SECTION 3: FINANCIAL DETAILS PER CLIENT ---
       // Check for page break
-      if (finalY > 250) doc.addPage();
-
-      const startYFinancials = finalY > 250 ? 20 : finalY + 10;
+      if ((doc as any).lastAutoTable.finalY > 200) doc.addPage();
       
+      const startYFin = (doc as any).lastAutoTable.finalY > 200 ? 20 : (doc as any).lastAutoTable.finalY + 10;
+
       doc.setFontSize(11);
       doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-      doc.text("RESUMEN FINANCIERO DEL LOTE", 14, startYFinancials);
+      doc.text("2. RESUMEN FINANCIERO DE CUENTAS", 14, startYFin);
 
-      autoTable(doc, {
-          startY: startYFinancials + 5,
-          theme: 'grid',
-          headStyles: { fillColor: [21, 128, 61], textColor: 255, fontStyle: 'bold', halign: 'center' }, // Emerald Green
-          columnStyles: { 0: { fontStyle: 'bold', cellWidth: 80 }, 1: { halign: 'right', fontStyle: 'bold' } },
-          head: [['CONCEPTO', 'MONTO (S/.)']],
-          body: [
-              ['Total Venta (Valorizado)', `S/. ${totalSoldMoney.toFixed(2)}`],
-              ['Total Cobrado (Recaudado)', `S/. ${totalPaidMoney.toFixed(2)}`],
-              [{ content: 'TOTAL POR COBRAR (Pendiente)', styles: { textColor: [220, 38, 38] } }, { content: `S/. ${pendingMoney.toFixed(2)}`, styles: { textColor: [220, 38, 38], fontSize: 12 } }]
-          ],
-          tableWidth: 140
+      let totalBatchSale = 0;
+      let totalBatchPaid = 0;
+
+      const financialData = stats.batchOrders.map((o: ClientOrder, index: number) => {
+          const wFull = o.records.filter(r => r.type === 'FULL').reduce((a, b) => a + b.weight, 0);
+          const wEmpty = o.records.filter(r => r.type === 'EMPTY').reduce((a, b) => a + b.weight, 0);
+          const wMort = o.records.filter(r => r.type === 'MORTALITY').reduce((a, b) => a + b.weight, 0);
+          let net = wFull - wEmpty - wMort;
+          if (o.weighingMode === WeighingType.SOLO_POLLO) net = wFull;
+
+          const saleAmount = net * o.pricePerKg;
+          const paidAmount = o.payments.reduce((a,b)=>a+b.amount, 0);
+          const debt = saleAmount - paidAmount;
+          
+          totalBatchSale += saleAmount;
+          totalBatchPaid += paidAmount;
+
+          return [
+              index + 1,
+              o.clientName,
+              `S/. ${o.pricePerKg.toFixed(2)}`,
+              `S/. ${saleAmount.toFixed(2)}`,
+              `S/. ${paidAmount.toFixed(2)}`,
+              debt > 0.1 ? `S/. ${debt.toFixed(2)}` : '-'
+          ];
       });
 
-      // Footer
+      autoTable(doc, {
+          startY: startYFin + 5,
+          head: [['#', 'Cliente', 'Precio/Kg', 'Venta Total', 'Abonado', 'Por Cobrar']],
+          body: financialData,
+          theme: 'striped',
+          headStyles: { fillColor: [30, 58, 138], halign: 'center' }, // Dark Blue
+          columnStyles: {
+              0: { halign: 'center', cellWidth: 10 },
+              2: { halign: 'right' },
+              3: { halign: 'right', fontStyle: 'bold' },
+              4: { halign: 'right', textColor: [22, 163, 74] },
+              5: { halign: 'right', textColor: [220, 38, 38], fontStyle: 'bold' }
+          }
+      });
+
+      const totalBatchDebt = totalBatchSale - totalBatchPaid;
+
+      // --- SECTION 4: GRAND TOTALS ---
+      // Check for page break
+      if ((doc as any).lastAutoTable.finalY > 230) doc.addPage();
+      const startYTotal = (doc as any).lastAutoTable.finalY > 230 ? 20 : (doc as any).lastAutoTable.finalY + 10;
+
+      doc.text("RESUMEN DE LIQUIDACIÓN", 14, startYTotal);
+
+      autoTable(doc, {
+          startY: startYTotal + 5,
+          theme: 'grid',
+          headStyles: { fillColor: [15, 23, 42], textColor: 255, fontStyle: 'bold', halign: 'center' },
+          columnStyles: { 0: { fontStyle: 'bold', cellWidth: 90 }, 1: { halign: 'right', fontStyle: 'bold', fontSize: 11 } },
+          head: [['CONCEPTO', 'MONTO (S/.)']],
+          body: [
+              ['VALORIZACIÓN TOTAL DEL LOTE', `S/. ${totalBatchSale.toFixed(2)}`],
+              ['DINERO RECAUDADO (CAJA)', `S/. ${totalBatchPaid.toFixed(2)}`],
+              [{ content: 'CARTERA POR COBRAR (CREDITOS)', styles: { textColor: [220, 38, 38], fillColor: [254, 242, 242] } }, { content: `S/. ${totalBatchDebt.toFixed(2)}`, styles: { textColor: [220, 38, 38], fontSize: 13, fillColor: [254, 242, 242] } }]
+          ],
+          tableWidth: 150
+      });
+
       const pageCount = (doc as any).internal.getNumberOfPages();
       for(let i = 1; i <= pageCount; i++) {
           doc.setPage(i);

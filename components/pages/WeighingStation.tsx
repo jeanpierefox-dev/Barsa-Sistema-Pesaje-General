@@ -177,7 +177,6 @@ const WeighingStation: React.FC = () => {
     } else if (mode === WeighingType.SOLO_JABAS) {
         estimatedChickens = fullCratesCount * chickensPerCrate;
     } else {
-        // CHANGED: Default calculation is now 9 chickens per crate as requested
         estimatedChickens = fullCratesCount * 9; 
     }
 
@@ -229,7 +228,7 @@ const WeighingStation: React.FC = () => {
     setActiveOrder(updatedOrder);
   };
 
-  // Direct Print Ticket Logic
+  // --- CORPORATE TICKET STYLE ---
   const printTicket = (isPreview: boolean = false) => {
     if (!activeOrder) return;
     const totals = getTotals(activeOrder);
@@ -237,57 +236,65 @@ const WeighingStation: React.FC = () => {
     const currentPrice = isPreview || activeOrder.pricePerKg === 0 ? pricePerKg : activeOrder.pricePerKg;
     const totalPay = (mode === WeighingType.SOLO_POLLO ? totals.totalFullWeight : totals.netWeight) * currentPrice;
 
-    const doc = new jsPDF({ unit: 'mm', format: [80, 200] });
+    const doc = new jsPDF({ unit: 'mm', format: [80, 220] });
+    
+    // --- STYLING CONSTANTS ---
+    const pageWidth = 80;
+    const centerX = pageWidth / 2;
+    let y = 10;
 
+    // 1. HEADER LOGO & COMPANY
     if (config.logoUrl) {
-        try { doc.addImage(config.logoUrl, 'PNG', 25, 2, 30, 30); } catch {}
+        try { doc.addImage(config.logoUrl, 'PNG', centerX - 10, y, 20, 20); y+= 22; } catch {}
+    } else {
+        y += 5;
     }
 
-    let y = 35;
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text(config.companyName || 'AVICOLA', 40, y, { align: 'center' });
-    y += 5;
-    doc.setFontSize(10);
-    doc.text("TICKET DE VENTA", 40, y, { align: 'center' });
+    doc.setFontSize(14);
+    doc.text(config.companyName.toUpperCase() || 'AVICOLA', centerX, y, { align: 'center' });
     y += 5;
     doc.setFontSize(8);
     doc.setFont("helvetica", "normal");
-    doc.text(`Fecha: ${new Date().toLocaleString()}`, 40, y, { align: 'center' });
-    y += 6;
-    doc.line(2, y, 78, y);
+    doc.text("RUC: 20601234567 | Lima, Perú", centerX, y, { align: 'center' }); // Example place
     y += 5;
-    
-    doc.text(`Cliente: ${activeOrder.clientName}`, 2, y);
-    y += 4;
-    
-    doc.text(`Prom. Pollo: ${totals.avgWeight.toFixed(3)} kg`, 2, y);
-    y += 4;
-    doc.text(`Unidades Est.: ${totals.estimatedChickens}`, 2, y);
+    doc.text("TICKET DE VENTA ELECTRONICO", centerX, y, { align: 'center' });
     y += 6;
 
-    // Table Content
-    doc.setFont("helvetica", "bold");
-    doc.text("DETALLE", 2, y);
+    // 2. INFO BOX
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.1);
+    doc.line(5, y, 75, y);
     y += 4;
-    doc.setFont("helvetica", "normal");
     
+    doc.setFontSize(9);
+    doc.text(`FECHA: ${new Date().toLocaleString()}`, 5, y);
+    y += 4;
+    doc.text(`CLIENTE: ${activeOrder.clientName}`, 5, y);
+    y += 4;
+    doc.text(`ID TICKET: #${activeOrder.id.slice(-6)}`, 5, y);
+    y += 5;
+    doc.line(5, y, 75, y);
+    y += 5;
+
+    // 3. DETAILS TABLE
+    doc.setFont("helvetica", "bold");
+    doc.text("DESCRIPCIÓN", 5, y);
+    doc.text("CANT.", 45, y, { align: 'center' });
+    doc.text("TOTAL", 75, y, { align: 'right' });
+    y += 3;
+    doc.setFont("helvetica", "normal");
+
     const row = (label: string, qty: number, weight: number) => {
-        if(qty === 0) return;
-        doc.text(`${label}`, 2, y);
-        doc.text(`${qty}`, 40, y, { align: 'center' });
-        doc.text(`${weight.toFixed(2)}`, 78, y, { align: 'right' });
+        if(qty === 0 && weight === 0) return;
+        doc.text(label, 5, y);
+        doc.text(qty.toString(), 45, y, { align: 'center' });
+        doc.text(`${weight.toFixed(2)} kg`, 75, y, { align: 'right' });
         y += 4;
-    }
-
-    doc.setFontSize(8);
-    doc.text("Desc.", 2, y); doc.text("Cant.", 40, y, {align: 'center'}); doc.text("Peso", 78, y, {align: 'right'});
-    y+=2;
-    doc.line(2, y, 78, y);
-    y+=4;
+    };
 
     if(mode === WeighingType.SOLO_POLLO) {
-        row('Pollos', totals.fullCratesCount, totals.totalFullWeight);
+        row('Pollos (Bruto)', totals.fullCratesCount, totals.totalFullWeight);
     } else {
         row('Jabas Llenas', totals.fullCratesCount, totals.totalFullWeight);
         row('Jabas Vacías', totals.emptyCratesCount, totals.totalEmptyWeight);
@@ -295,36 +302,49 @@ const WeighingStation: React.FC = () => {
     }
     
     y += 2;
-    doc.line(2, y, 78, y);
+    doc.setLineDash([1, 1], 0);
+    doc.line(5, y, 75, y);
+    doc.setLineDash([], 0);
     y += 5;
-    
+
+    // 4. TOTALS SECTION
     doc.setFontSize(10);
     doc.setFont("helvetica", "bold");
-    doc.text("PESO NETO:", 2, y);
-    doc.text(`${totals.netWeight.toFixed(2)} kg`, 78, y, { align: 'right' });
+    doc.text("PESO NETO:", 5, y);
+    doc.text(`${totals.netWeight.toFixed(2)} kg`, 75, y, { align: 'right' });
+    y += 5;
+    
+    doc.text(`PRECIO UNIT.:`, 5, y);
+    doc.text(`S/. ${currentPrice.toFixed(2)}`, 75, y, { align: 'right' });
     y += 6;
-    
-    doc.text(`PRECIO/KG: S/. ${currentPrice.toFixed(2)}`, 2, y);
-    y += 8;
-    
-    doc.setDrawColor(0);
-    doc.rect(2, y, 76, 12);
-    y += 8;
-    doc.setFontSize(14);
-    doc.text("TOTAL: S/.", 4, y);
-    doc.text(totalPay.toFixed(2), 76, y, { align: 'right' });
-    y += 10;
 
-    // Logic to show Payment Status correctly on ticket
+    // Big Total Box
+    doc.setFillColor(0); // Black fill
+    doc.roundedRect(5, y, 70, 14, 2, 2, 'F');
+    y += 9;
+    doc.setTextColor(255); // White text
+    doc.setFontSize(16);
+    doc.text("TOTAL A PAGAR", centerX, y - 2, { align: 'center' });
+    doc.text(`S/. ${totalPay.toFixed(2)}`, centerX, y + 4, { align: 'center' });
+    doc.setTextColor(0);
+    y += 12;
+
+    // 5. STATUS & FOOTER
     if (activeOrder.paymentStatus === 'PAID') {
-         doc.setFontSize(16);
-         doc.setTextColor(150);
-         doc.text("CANCELADO", 40, y+10, { align: 'center' });
-    } else if (payType === 'CREDIT' && activeOrder.paymentStatus === 'PENDING') {
-         doc.setFontSize(16);
-         doc.setTextColor(150);
-         doc.text("CRÉDITO", 40, y+10, { align: 'center' });
+         doc.setFontSize(14);
+         doc.setTextColor(100);
+         doc.text("[ CANCELADO ]", centerX, y + 5, { align: 'center' });
+    } else if (payType === 'CREDIT') {
+         doc.setFontSize(14);
+         doc.setTextColor(100);
+         doc.text("[ CRÉDITO ]", centerX, y + 5, { align: 'center' });
     }
+    
+    y += 15;
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "italic");
+    doc.text("Gracias por su preferencia.", centerX, y, { align: 'center' });
+    doc.text("Conserve este ticket para reclamos.", centerX, y + 3, { align: 'center' });
 
     doc.autoPrint();
     window.open(doc.output('bloburl'), '_blank');
@@ -941,7 +961,7 @@ const WeighingStation: React.FC = () => {
           </div>
       )}
 
-      {/* 3. Three Columns Layout - INCREASED DELETE BUTTON VISIBILITY */}
+      {/* 3. Three Columns Layout - INCREASED DELETE BUTTON VISIBILITY & SIZE */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1 min-h-0 pb-2">
           {mode === WeighingType.SOLO_POLLO ? (
               <div className="md:col-span-3 h-full">
@@ -951,12 +971,12 @@ const WeighingStation: React.FC = () => {
                      </div>
                      <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-slate-50">
                         {activeOrder.records.filter(r => r.type === 'FULL').map(r => (
-                           <div key={r.id} className="flex justify-between items-center p-3 bg-white rounded-lg border border-slate-200 shadow-sm hover:border-amber-300 transition-colors">
+                           <div key={r.id} className="flex justify-between items-center p-3 bg-white rounded-lg border border-slate-200 shadow-sm hover:border-amber-300 transition-colors group">
                                <span className="font-mono font-bold text-slate-900 text-xl">{r.weight.toFixed(2)}</span>
                                <span className="text-slate-400 font-bold bg-slate-100 px-2 py-1 rounded text-xs">x{r.quantity}</span>
                                {!isLocked && (
-                                   <button onClick={() => deleteRecord(r.id)} className="bg-red-100 text-red-600 hover:bg-red-600 hover:text-white p-2 rounded-lg transition-all shadow-sm flex items-center justify-center ml-4">
-                                       <Trash2 size={20} />
+                                   <button onClick={() => deleteRecord(r.id)} className="bg-red-50 text-red-600 hover:bg-red-600 hover:text-white p-2.5 rounded-lg transition-all shadow-sm flex items-center justify-center ml-4">
+                                       <Trash2 size={22} />
                                    </button>
                                )}
                            </div>
@@ -972,14 +992,14 @@ const WeighingStation: React.FC = () => {
                      </div>
                      <div className="flex-1 overflow-y-auto p-2 space-y-1 bg-slate-50">
                         {activeOrder.records.filter(r => r.type === 'FULL').map(r => (
-                           <div key={r.id} className="flex justify-between items-center p-2 bg-white rounded-lg border border-slate-200 shadow-sm hover:border-blue-300 transition-colors">
+                           <div key={r.id} className="flex justify-between items-center p-2 bg-white rounded-lg border border-slate-200 shadow-sm hover:border-blue-300 transition-colors group">
                                <div className="flex items-baseline gap-2">
                                    <span className="font-mono font-bold text-slate-900 text-lg">{r.weight.toFixed(2)}</span>
                                    <span className="text-slate-400 font-bold text-xs bg-slate-100 px-2 py-0.5 rounded">x{r.quantity}</span>
                                </div>
                                {!isLocked && (
-                                   <button onClick={() => deleteRecord(r.id)} className="bg-red-100 text-red-600 hover:bg-red-600 hover:text-white p-1.5 rounded-lg transition-all shadow-sm flex items-center justify-center">
-                                       <Trash2 size={16} />
+                                   <button onClick={() => deleteRecord(r.id)} className="bg-red-50 text-red-600 hover:bg-red-600 hover:text-white p-2 rounded-lg transition-all shadow-sm flex items-center justify-center">
+                                       <Trash2 size={18} />
                                    </button>
                                )}
                            </div>
@@ -992,14 +1012,14 @@ const WeighingStation: React.FC = () => {
                      </div>
                      <div className="flex-1 overflow-y-auto p-2 space-y-1 bg-slate-50">
                         {activeOrder.records.filter(r => r.type === 'EMPTY').map(r => (
-                           <div key={r.id} className="flex justify-between items-center p-2 bg-white rounded-lg border border-slate-200 shadow-sm hover:border-orange-300 transition-colors">
+                           <div key={r.id} className="flex justify-between items-center p-2 bg-white rounded-lg border border-slate-200 shadow-sm hover:border-orange-300 transition-colors group">
                                <div className="flex items-baseline gap-2">
                                    <span className="font-mono font-bold text-slate-900 text-lg">{r.weight.toFixed(2)}</span>
                                    <span className="text-slate-400 font-bold text-xs bg-slate-100 px-2 py-0.5 rounded">x{r.quantity}</span>
                                </div>
                                {!isLocked && (
-                                   <button onClick={() => deleteRecord(r.id)} className="bg-red-100 text-red-600 hover:bg-red-600 hover:text-white p-1.5 rounded-lg transition-all shadow-sm flex items-center justify-center">
-                                       <Trash2 size={16} />
+                                   <button onClick={() => deleteRecord(r.id)} className="bg-red-50 text-red-600 hover:bg-red-600 hover:text-white p-2 rounded-lg transition-all shadow-sm flex items-center justify-center">
+                                       <Trash2 size={18} />
                                    </button>
                                )}
                            </div>
@@ -1012,14 +1032,14 @@ const WeighingStation: React.FC = () => {
                      </div>
                      <div className="flex-1 overflow-y-auto p-2 space-y-1 bg-slate-50">
                         {activeOrder.records.filter(r => r.type === 'MORTALITY').map(r => (
-                           <div key={r.id} className="flex justify-between items-center p-2 bg-white rounded-lg border border-slate-200 shadow-sm hover:border-red-300 transition-colors">
+                           <div key={r.id} className="flex justify-between items-center p-2 bg-white rounded-lg border border-slate-200 shadow-sm hover:border-red-300 transition-colors group">
                                <div className="flex items-baseline gap-2">
                                    <span className="font-mono font-bold text-slate-900 text-lg">{r.weight.toFixed(2)}</span>
                                    <span className="text-slate-400 font-bold text-xs bg-slate-100 px-2 py-0.5 rounded">x{r.quantity}</span>
                                </div>
                                {!isLocked && (
-                                   <button onClick={() => deleteRecord(r.id)} className="bg-red-100 text-red-600 hover:bg-red-600 hover:text-white p-1.5 rounded-lg transition-all shadow-sm flex items-center justify-center">
-                                       <Trash2 size={16} />
+                                   <button onClick={() => deleteRecord(r.id)} className="bg-red-50 text-red-600 hover:bg-red-600 hover:text-white p-2 rounded-lg transition-all shadow-sm flex items-center justify-center">
+                                       <Trash2 size={18} />
                                    </button>
                                )}
                            </div>

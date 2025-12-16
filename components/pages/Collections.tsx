@@ -91,27 +91,64 @@ const Collections: React.FC = () => {
         format: [80, 150] 
     });
 
+    const pageWidth = 80;
+    const centerX = pageWidth / 2;
+    let y = 10;
+
+    // Header
     if (config.logoUrl) {
-        try { doc.addImage(config.logoUrl, 'PNG', 25, 5, 30, 30); } catch {}
+        try { doc.addImage(config.logoUrl, 'PNG', centerX - 10, y, 20, 20); y+= 22; } catch {}
+    } else {
+        y += 5;
     }
 
-    doc.setFontSize(10);
-    doc.text(config.companyName || "AVICOLA", 40, 40, { align: 'center' });
     doc.setFont("helvetica", "bold");
-    doc.text("RECIBO DE ABONO", 40, 45, { align: 'center' });
-    
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-    doc.text(`Fecha: ${new Date().toLocaleString()}`, 5, 55);
-    doc.text(`Cliente: ${order.clientName}`, 5, 60);
-    doc.line(5, 62, 75, 62);
-    
+    doc.setFontSize(12);
+    doc.text(config.companyName.toUpperCase() || "AVICOLA", centerX, y, { align: 'center' });
+    y += 5;
     doc.setFontSize(10);
-    doc.text(`Abono: S/. ${amountPaid.toFixed(2)}`, 5, 70);
-    doc.text(`Saldo Restante: S/. ${Math.max(0, remaining).toFixed(2)}`, 5, 76);
+    doc.text("RECIBO DE ABONO", centerX, y, { align: 'center' });
+    y += 5;
     
+    doc.setLineWidth(0.1);
+    doc.line(5, y, 75, y);
+    y += 5;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text(`FECHA: ${new Date().toLocaleString()}`, 5, y);
+    y += 4;
+    doc.text(`CLIENTE: ${order.clientName}`, 5, y);
+    y += 4;
+    doc.text(`ID REF: #${order.id.slice(-6)}`, 5, y);
+    y += 5;
+    doc.line(5, y, 75, y);
+    y += 6;
+    
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.text("MONTO ABONADO:", 5, y);
+    doc.text(`S/. ${amountPaid.toFixed(2)}`, 75, y, { align: 'right' });
+    y += 8;
+
+    doc.setFontSize(10);
+    doc.text("SALDO RESTANTE:", 5, y);
+    doc.text(`S/. ${Math.max(0, remaining).toFixed(2)}`, 75, y, { align: 'right' });
+    y += 8;
+
+    if (remaining <= 0.1) {
+        doc.setFontSize(14);
+        doc.setTextColor(100);
+        doc.text("[ CUENTA SALDADA ]", centerX, y + 5, { align: 'center' });
+        y += 15;
+    } else {
+        y += 5;
+    }
+    
+    doc.setTextColor(0);
     doc.setFontSize(7);
-    doc.text("Gracias por su pago", 40, 90, { align: 'center' });
+    doc.setFont("helvetica", "italic");
+    doc.text("Gracias por su pago.", centerX, y, { align: 'center' });
     
     doc.autoPrint();
     window.open(doc.output('bloburl'), '_blank');
