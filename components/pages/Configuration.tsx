@@ -1,7 +1,7 @@
 import React, { useState, useContext, useEffect } from 'react';
 import { AppConfig, UserRole } from '../../types';
 import { getConfig, saveConfig, resetApp, isFirebaseConfigured, restoreBackup } from '../../services/storage';
-import { Printer, Save, Check, AlertTriangle, Bluetooth, Link2, MonitorCheck, Database, Cloud, CloudOff, Copy, Download, Upload, HardDriveDownload, HardDriveUpload } from 'lucide-react';
+import { Printer, Save, Check, AlertTriangle, Bluetooth, Link2, MonitorCheck, Database, Cloud, CloudOff, Copy, Download, Upload, HardDriveDownload, HardDriveUpload, Smartphone, Share2, Key } from 'lucide-react';
 import { AuthContext } from '../../App';
 
 const Configuration: React.FC = () => {
@@ -10,9 +10,12 @@ const Configuration: React.FC = () => {
   const [isScanning, setIsScanning] = useState(false);
   const { user } = useContext(AuthContext);
   const [isConnected, setIsConnected] = useState(false);
-  const [importString, setImportString] = useState('');
-  const [showImport, setShowImport] = useState(false);
   
+  // Connection State
+  const [connectionToken, setConnectionToken] = useState('');
+  const [showLinkInput, setShowLinkInput] = useState(false);
+  const [linkMode, setLinkMode] = useState<'GENERATE' | 'INPUT' | null>(null);
+
   // Backup State
   const [showBackupInput, setShowBackupInput] = useState(false);
   const [backupString, setBackupString] = useState('');
@@ -56,36 +59,60 @@ const Configuration: React.FC = () => {
       }, 1000);
   };
 
-  const copyConfigToClipboard = () => {
+  // --- NEW SIMPLIFIED CONNECTION LOGIC ---
+
+  const generateLinkCode = () => {
       if (!config.firebaseConfig) {
-          alert("No hay configuración de Firebase para exportar.");
+          alert("Primero debes configurar Firebase manualmente en el código o tener una conexión activa.");
           return;
       }
-      const jsonStr = JSON.stringify(config.firebaseConfig);
-      navigator.clipboard.writeText(jsonStr).then(() => {
-          alert("Código de conexión copiado al portapapeles.\n\nEnvíalo a tus otros dispositivos y pégalo en el botón 'Importar'.");
-      });
+      // Encode config to Base64 to make it look like a simple token
+      try {
+          const jsonStr = JSON.stringify(config.firebaseConfig);
+          const token = btoa(jsonStr);
+          const finalToken = `AVI_LINK_${token}`;
+          
+          navigator.clipboard.writeText(finalToken).then(() => {
+              alert("¡CÓDIGO COPIADO!\n\nEnvía este código por WhatsApp o correo a tu otro dispositivo y pégalo allí para vincularlo.");
+          });
+          setLinkMode('GENERATE');
+      } catch (e) {
+          alert("Error al generar el código.");
+      }
   };
 
-  const handleImportConfig = () => {
+  const handleLinkDevice = () => {
       try {
-          const parsed = JSON.parse(importString);
+          let cleanToken = connectionToken.trim();
+          
+          if (!cleanToken) return;
+
+          // Remove prefix if present
+          if (cleanToken.startsWith('AVI_LINK_')) {
+              cleanToken = cleanToken.replace('AVI_LINK_', '');
+          }
+
+          // Decode
+          const jsonStr = atob(cleanToken);
+          const parsed = JSON.parse(jsonStr);
+
           if (parsed.apiKey && parsed.projectId) {
               const newConfig = { ...config, firebaseConfig: parsed };
               setConfig(newConfig);
               saveConfig(newConfig);
-              setImportString('');
-              setShowImport(false);
-              alert("¡Conexión importada exitosamente! El sistema ahora está sincronizado.");
+              setConnectionToken('');
+              setLinkMode(null);
+              alert("¡VINCULACIÓN EXITOSA!\n\nEste dispositivo ahora está sincronizado con la nube.");
+              window.location.reload(); // Reload to ensure services start
           } else {
-              alert("El código no parece válido. Falta API Key o Project ID.");
+              alert("El código es inválido. Verifica que copiaste todo el texto.");
           }
       } catch (e) {
-          alert("Error al leer el código. Asegúrate de copiar todo el texto JSON.");
+          alert("Código inválido. Asegúrate de copiar el código completo generado en el dispositivo principal.");
       }
   };
 
-  // --- NEW BACKUP LOGIC ---
+  // --- BACKUP LOGIC ---
   const handleDownloadBackup = () => {
       const data = {
           users: localStorage.getItem('avi_users'),
@@ -215,70 +242,107 @@ const Configuration: React.FC = () => {
         {user?.role === UserRole.ADMIN && (
             <div className="border-t border-gray-200 pt-6">
                 <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-bold text-lg text-gray-900 flex items-center"><Database className="mr-2"/> Conexión a Nube (Multidispositivo)</h3>
+                    <h3 className="font-bold text-lg text-gray-900 flex items-center"><Database className="mr-2"/> Nube y Sincronización</h3>
                     <div className={`px-4 py-1.5 rounded-full text-xs font-black flex items-center ${isConnected ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
                         {isConnected ? <Cloud size={14} className="mr-2"/> : <CloudOff size={14} className="mr-2"/>}
-                        {isConnected ? "SISTEMA CONECTADO" : "SIN CONEXIÓN"}
+                        {isConnected ? "CONECTADO" : "SIN CONEXIÓN"}
                     </div>
                 </div>
 
-                <div className="bg-gray-50 p-6 rounded-xl border border-gray-200 relative overflow-hidden">
-                    {isConnected && (
-                        <div className="absolute top-0 right-0 bg-emerald-500 text-white text-[10px] font-bold px-3 py-1 rounded-bl-xl shadow-sm z-10">
-                            CONFIGURACIÓN ACTIVA
+                <div className="bg-slate-50 p-6 rounded-xl border border-slate-200">
+                    <p className="text-sm text-slate-600 mb-6">
+                        Conecte múltiples dispositivos para ver los mismos datos en tiempo real. 
+                    </p>
+                    
+                    {!linkMode ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                             <button 
+                                onClick={generateLinkCode}
+                                className="bg-white border-2 border-blue-200 p-4 rounded-xl hover:bg-blue-50 transition-all text-left group"
+                             >
+                                 <div className="flex items-center mb-2 text-blue-700 group-hover:scale-105 transition-transform">
+                                     <Share2 className="mr-2"/>
+                                     <span className="font-black">Compartir Conexión</span>
+                                 </div>
+                                 <p className="text-xs text-slate-500">
+                                     Este es el dispositivo principal. Generar código para conectar otros.
+                                 </p>
+                             </button>
+
+                             <button 
+                                onClick={() => setLinkMode('INPUT')}
+                                className="bg-white border-2 border-emerald-200 p-4 rounded-xl hover:bg-emerald-50 transition-all text-left group"
+                             >
+                                 <div className="flex items-center mb-2 text-emerald-700 group-hover:scale-105 transition-transform">
+                                     <Smartphone className="mr-2"/>
+                                     <span className="font-black">Conectar Nuevo Dispositivo</span>
+                                 </div>
+                                 <p className="text-xs text-slate-500">
+                                     Tengo un código de otro dispositivo y quiero pegarlo aquí.
+                                 </p>
+                             </button>
+                        </div>
+                    ) : (
+                        <div className="bg-white p-4 rounded-xl border border-slate-200 animate-fade-in">
+                            <div className="flex justify-between items-center mb-4">
+                                <h4 className="font-bold text-slate-800">
+                                    {linkMode === 'GENERATE' ? 'Código de Vinculación Generado' : 'Ingresar Código de Vinculación'}
+                                </h4>
+                                <button onClick={() => setLinkMode(null)} className="text-xs font-bold text-slate-400 hover:text-slate-600">CANCELAR</button>
+                            </div>
+
+                            {linkMode === 'GENERATE' && (
+                                <div className="text-center py-4">
+                                    <div className="bg-green-100 text-green-800 p-3 rounded-lg text-sm font-bold mb-2">
+                                        ¡Copiado al portapapeles!
+                                    </div>
+                                    <p className="text-xs text-slate-500">
+                                        Pega este código en el nuevo dispositivo seleccionando la opción "Conectar Nuevo Dispositivo".
+                                    </p>
+                                </div>
+                            )}
+
+                            {linkMode === 'INPUT' && (
+                                <div>
+                                    <div className="relative">
+                                        <Key className="absolute left-3 top-3 text-slate-400" size={18}/>
+                                        <input 
+                                            value={connectionToken}
+                                            onChange={e => setConnectionToken(e.target.value)}
+                                            placeholder="Pegar código (ej. AVI_LINK_...)"
+                                            className="w-full pl-10 pr-4 py-3 border-2 border-slate-200 rounded-lg font-mono text-sm focus:border-emerald-500 outline-none"
+                                        />
+                                    </div>
+                                    <button 
+                                        onClick={handleLinkDevice}
+                                        className="w-full mt-3 bg-emerald-600 text-white py-3 rounded-lg font-bold hover:bg-emerald-700 shadow-md flex items-center justify-center"
+                                    >
+                                        <Link2 size={18} className="mr-2"/> VINCULAR AHORA
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     )}
                     
-                    <div className="mb-4 flex flex-col md:flex-row gap-3">
-                         <button onClick={copyConfigToClipboard} className="flex-1 bg-white border border-blue-200 text-blue-700 px-4 py-2 rounded-lg text-sm font-bold flex items-center justify-center hover:bg-blue-50 shadow-sm">
-                             <Copy size={16} className="mr-2"/> Copiar Código de Conexión
-                         </button>
-                         <button onClick={() => setShowImport(!showImport)} className="flex-1 bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-bold flex items-center justify-center hover:bg-slate-50 shadow-sm">
-                             <Upload size={16} className="mr-2"/> Importar / Pegar Código
-                         </button>
-                    </div>
-
-                    {showImport && (
-                        <div className="mb-6 animate-fade-in">
-                            <label className="block text-xs font-bold text-slate-500 mb-1">Pega aquí el código copiado desde el otro dispositivo:</label>
-                            <textarea 
-                                value={importString}
-                                onChange={e => setImportString(e.target.value)}
-                                className="w-full h-24 p-3 text-xs font-mono border-2 border-slate-300 rounded-lg focus:border-blue-500 outline-none"
-                                placeholder='{"apiKey": "AIzaSy...", "projectId": "..."}'
-                            />
-                            <button onClick={handleImportConfig} className="mt-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold w-full hover:bg-blue-700">
-                                Validar y Conectar Dispositivo
-                            </button>
-                        </div>
-                    )}
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 opacity-80 hover:opacity-100 transition-opacity">
-                        <div className="md:col-span-2 text-xs text-slate-400 font-bold uppercase tracking-wider">Configuración Manual (Avanzado)</div>
-                        <input 
-                            placeholder="API Key" 
-                            value={config.firebaseConfig?.apiKey || ''} 
-                            onChange={e => setConfig({...config, firebaseConfig: {...config.firebaseConfig, apiKey: e.target.value} as any})}
-                            className="p-3 border rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none text-xs" 
-                        />
-                        <input 
-                            placeholder="Auth Domain" 
-                            value={config.firebaseConfig?.authDomain || ''} 
-                            onChange={e => setConfig({...config, firebaseConfig: {...config.firebaseConfig, authDomain: e.target.value} as any})}
-                            className="p-3 border rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none text-xs" 
-                        />
-                        <input 
-                            placeholder="Project ID" 
-                            value={config.firebaseConfig?.projectId || ''} 
-                            onChange={e => setConfig({...config, firebaseConfig: {...config.firebaseConfig, projectId: e.target.value} as any})}
-                            className="p-3 border rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none text-xs" 
-                        />
-                        <input 
-                            placeholder="Storage Bucket" 
-                            value={config.firebaseConfig?.storageBucket || ''} 
-                            onChange={e => setConfig({...config, firebaseConfig: {...config.firebaseConfig, storageBucket: e.target.value} as any})}
-                            className="p-3 border rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none text-xs" 
-                        />
+                    {/* Advanced Toggle Hidden */}
+                    <div className="mt-6 pt-4 border-t border-slate-200">
+                        <details className="text-xs text-slate-400">
+                            <summary className="cursor-pointer hover:text-slate-600 font-bold mb-2">Opciones Avanzadas (Manual)</summary>
+                            <div className="grid grid-cols-1 gap-2 mt-2">
+                                <input 
+                                    placeholder="API Key" 
+                                    value={config.firebaseConfig?.apiKey || ''} 
+                                    onChange={e => setConfig({...config, firebaseConfig: {...config.firebaseConfig, apiKey: e.target.value} as any})}
+                                    className="p-2 border rounded shadow-sm focus:ring-2 focus:ring-blue-500 outline-none" 
+                                />
+                                <input 
+                                    placeholder="Project ID" 
+                                    value={config.firebaseConfig?.projectId || ''} 
+                                    onChange={e => setConfig({...config, firebaseConfig: {...config.firebaseConfig, projectId: e.target.value} as any})}
+                                    className="p-2 border rounded shadow-sm focus:ring-2 focus:ring-blue-500 outline-none" 
+                                />
+                            </div>
+                        </details>
                     </div>
                 </div>
             </div>
