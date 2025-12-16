@@ -61,6 +61,7 @@ export interface Batch {
 
 export interface AppConfig {
   companyName: string;
+  organizationId?: string; // New field for multi-tenancy or identification
   logoUrl: string; // Base64 or URL
   printerConnected: boolean;
   scaleConnected: boolean;

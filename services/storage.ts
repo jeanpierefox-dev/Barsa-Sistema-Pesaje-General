@@ -1,5 +1,5 @@
 import { User, UserRole, Batch, ClientOrder, AppConfig } from '../types';
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp, deleteApp } from 'firebase/app';
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, enableIndexedDbPersistence, initializeFirestore, CACHE_SIZE_UNLIMITED } from 'firebase/firestore';
 
 const KEYS = {
@@ -19,6 +19,32 @@ const safeParse = (key: string, fallback: any) => {
     } catch (e) {
         console.warn(`Data corruption detected in ${key}. Resetting to default.`);
         return fallback;
+    }
+};
+
+// --- Validator Helper ---
+export const validateConfig = async (firebaseConfig: any): Promise<{ valid: boolean; error?: string }> => {
+    try {
+        if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+            return { valid: false, error: "Faltan campos obligatorios (API Key o Project ID)." };
+        }
+
+        // Create a temporary app instance to test validity
+        const tempName = 'validator_' + Date.now();
+        const app = initializeApp(firebaseConfig, tempName);
+        
+        // Check if we can initialize Firestore
+        const db = getFirestore(app);
+        
+        // We don't perform a network call here to avoid waiting too long or CORS issues on simple validation,
+        // but if the config is malformed (e.g. invalid chars in project ID), initializeApp usually throws.
+        
+        // Clean up
+        await deleteApp(app);
+        
+        return { valid: true };
+    } catch (e: any) {
+        return { valid: false, error: e.message || "La configuración no es válida." };
     }
 };
 
@@ -61,22 +87,34 @@ export const initCloudSync = async () => {
 
   if (config.firebaseConfig?.apiKey && config.firebaseConfig?.projectId) {
     try {
-      const app = initializeApp(config.firebaseConfig);
+      let app;
       
-      // Initialize Firestore with Offline Persistence enabled
-      db = initializeFirestore(app, {
-          cacheSizeBytes: CACHE_SIZE_UNLIMITED
-      });
+      // CRITICAL FIX: Check if app is already initialized to prevent crash
+      if (!getApps().length) {
+          app = initializeApp(config.firebaseConfig);
+          // Initialize Firestore with Offline Persistence enabled only on first init
+          db = initializeFirestore(app, {
+              cacheSizeBytes: CACHE_SIZE_UNLIMITED
+          });
+      } else {
+          app = getApp();
+          db = getFirestore(app);
+      }
 
       try {
-          await enableIndexedDbPersistence(db);
-          console.log("💾 Persistencia Offline Activada: Los datos están seguros.");
+          // Attempt to enable persistence only if not already enabled/failed
+          await enableIndexedDbPersistence(db).catch((err) => {
+             if (err.code === 'failed-precondition') {
+                 // Multiple tabs open, persistence can only be enabled in one tab at a a time.
+                 console.warn("Persistencia offline desactivada (Múltiples pestañas abiertas).");
+             } else if (err.code === 'unimplemented') {
+                 // The current browser does not support all of the features required to enable persistence
+                 console.warn("Navegador no soporta persistencia offline.");
+             }
+          });
+          console.log("💾 Base de datos lista.");
       } catch (err: any) {
-          if (err.code == 'failed-precondition') {
-              console.warn("Persistencia falló: Múltiples pestañas abiertas.");
-          } else if (err.code == 'unimplemented') {
-              console.warn("El navegador no soporta persistencia.");
-          }
+          // Ignore persistence errors, continue with online mode
       }
 
       console.log("☁️ Nube conectada: Sincronizando datos...");
@@ -88,7 +126,8 @@ export const initCloudSync = async () => {
       startListeners();
 
     } catch (e) {
-      console.error("Error al conectar con Firebase:", e);
+      console.error("Error FATAL al conectar con Firebase:", e);
+      // Optional: alert the user via UI if needed, but don't crash the app
     }
   }
 };
@@ -97,47 +136,54 @@ const startListeners = () => {
   if (!db) return;
 
   const syncCollection = (colName: string, storageKey: string, eventName: string) => {
-    const q = collection(db, colName);
-    
-    const unsub = onSnapshot(q, { includeMetadataChanges: true }, (snapshot) => {
-      const remoteData: any[] = [];
-      snapshot.forEach((doc) => {
-        remoteData.push(doc.data());
-      });
-      
-      const currentLocal = safeParse(storageKey, []);
-      const remoteIds = new Set(remoteData.map(d => d.id));
-      
-      // Keep items created locally that haven't synced yet (though uploadLocalToCloud handles most)
-      const pendingUploadItems = currentLocal.filter((localItem: any) => {
-          if (remoteIds.has(localItem.id)) return false;
+    try {
+        const q = collection(db, colName);
+        
+        const unsub = onSnapshot(q, { includeMetadataChanges: true }, (snapshot) => {
+          const remoteData: any[] = [];
+          snapshot.forEach((doc) => {
+            remoteData.push(doc.data());
+          });
           
-          let timestamp = localItem.createdAt || localItem.timestamp;
-          if (!timestamp && localItem.id && !isNaN(Number(localItem.id))) {
-              timestamp = Number(localItem.id);
-          }
-
-          if (timestamp) {
-              const now = Date.now();
-              // Keep local items created in the last 7 days if they aren't on cloud yet
-              if ((now - timestamp) < 604800000) { 
-                  return true; 
+          const currentLocal = safeParse(storageKey, []);
+          const remoteIds = new Set(remoteData.map(d => d.id));
+          
+          // Keep items created locally that haven't synced yet (though uploadLocalToCloud handles most)
+          const pendingUploadItems = currentLocal.filter((localItem: any) => {
+              if (remoteIds.has(localItem.id)) return false;
+              
+              let timestamp = localItem.createdAt || localItem.timestamp;
+              if (!timestamp && localItem.id && !isNaN(Number(localItem.id))) {
+                  timestamp = Number(localItem.id);
               }
+
+              if (timestamp) {
+                  const now = Date.now();
+                  // Keep local items created in the last 7 days if they aren't on cloud yet
+                  if ((now - timestamp) < 604800000) { 
+                      return true; 
+                  }
+              }
+              return false; 
+          });
+
+          const mergedData = [...remoteData, ...pendingUploadItems];
+          // Deduplicate by ID favoring remote data
+          const uniqueData = Array.from(new Map(mergedData.map(item => [item.id, item])).values());
+
+          if (uniqueData.length > 0 || snapshot.empty) {
+            localStorage.setItem(storageKey, JSON.stringify(uniqueData));
+            window.dispatchEvent(new Event(eventName));
           }
-          return false; 
-      });
-
-      const mergedData = [...remoteData, ...pendingUploadItems];
-      // Deduplicate by ID favoring remote data
-      const uniqueData = Array.from(new Map(mergedData.map(item => [item.id, item])).values());
-
-      if (uniqueData.length > 0 || snapshot.empty) {
-        localStorage.setItem(storageKey, JSON.stringify(uniqueData));
-        window.dispatchEvent(new Event(eventName));
-      }
-    });
-    
-    unsubscribers.push(unsub);
+        });
+        
+        unsubscribers.push(unsub);
+    } catch(e: any) {
+        console.error(`Error setting up listener for ${colName}:`, e);
+        if (e.code === 'permission-denied') {
+            alert("⚠️ ERROR DE PERMISOS: No se pueden leer los datos.\n\nPor favor ve a Firebase Console -> Firestore Database -> Reglas y configúralas en modo 'test' (allow read, write: if true;)");
+        }
+    }
   };
 
   syncCollection('users', KEYS.USERS, 'avi_data_users');
@@ -161,6 +207,7 @@ const seedData = () => {
   if (localStorage.getItem(KEYS.CONFIG) === null) {
     const config: AppConfig = {
       companyName: 'Avícola Demo',
+      organizationId: '',
       logoUrl: '',
       printerConnected: false,
       scaleConnected: false,
