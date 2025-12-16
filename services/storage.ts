@@ -26,6 +26,32 @@ const safeParse = (key: string, fallback: any) => {
 let db: any = null;
 let unsubscribers: Function[] = [];
 
+// Helper to push all local data to cloud immediately upon connection
+const uploadLocalToCloud = async () => {
+  if (!db) return;
+  console.log("⬆️ Iniciando subida de datos locales a la nube...");
+
+  const collections = [
+      { name: 'users', data: getUsers() },
+      { name: 'batches', data: getBatches() },
+      { name: 'orders', data: getOrders() }
+  ];
+  
+  for (const col of collections) {
+      for (const item of col.data) {
+          if (item && item.id) {
+            try {
+              // merge: true ensures we don't overwrite if cloud has newer specific fields (though normally complete overwrite is fine here)
+              await setDoc(doc(db, col.name, item.id), item, { merge: true });
+            } catch(e) {
+              console.error(`Error syncing item ${item.id} to cloud:`, e);
+            }
+          }
+      }
+  }
+  console.log("✅ Datos locales sincronizados con la nube.");
+};
+
 export const initCloudSync = async () => {
   const config = getConfig();
   
@@ -54,7 +80,13 @@ export const initCloudSync = async () => {
       }
 
       console.log("☁️ Nube conectada: Sincronizando datos...");
+      
+      // 1. Upload Local Data FIRST to ensure other devices see what we have
+      await uploadLocalToCloud();
+
+      // 2. Start Listening for changes
       startListeners();
+
     } catch (e) {
       console.error("Error al conectar con Firebase:", e);
     }
@@ -76,6 +108,7 @@ const startListeners = () => {
       const currentLocal = safeParse(storageKey, []);
       const remoteIds = new Set(remoteData.map(d => d.id));
       
+      // Keep items created locally that haven't synced yet (though uploadLocalToCloud handles most)
       const pendingUploadItems = currentLocal.filter((localItem: any) => {
           if (remoteIds.has(localItem.id)) return false;
           
@@ -86,6 +119,7 @@ const startListeners = () => {
 
           if (timestamp) {
               const now = Date.now();
+              // Keep local items created in the last 7 days if they aren't on cloud yet
               if ((now - timestamp) < 604800000) { 
                   return true; 
               }
@@ -94,6 +128,7 @@ const startListeners = () => {
       });
 
       const mergedData = [...remoteData, ...pendingUploadItems];
+      // Deduplicate by ID favoring remote data
       const uniqueData = Array.from(new Map(mergedData.map(item => [item.id, item])).values());
 
       if (uniqueData.length > 0 || snapshot.empty) {
