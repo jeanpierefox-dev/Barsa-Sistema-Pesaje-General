@@ -35,14 +35,17 @@ const Login: React.FC = () => {
   };
 
   const handleRestore = () => {
+      if (!backupString || !backupString.trim()) {
+          alert("El campo de código está vacío.");
+          return;
+      }
       try {
-          if (!backupString) return;
           const data = JSON.parse(backupString);
           if (confirm("¿Restaurar estos datos? Se sobrescribirá la información actual.")) {
               restoreBackup(data);
           }
-      } catch (e) {
-          alert("El código de respaldo no es válido.");
+      } catch (e: any) {
+          alert("Error: El código no es un JSON válido.\n" + e.message);
       }
   };
 

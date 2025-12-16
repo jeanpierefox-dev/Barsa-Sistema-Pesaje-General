@@ -1,8 +1,9 @@
 import React, { useState, useContext, useEffect } from 'react';
 import { AppConfig, UserRole } from '../../types';
 import { getConfig, saveConfig, resetApp, isFirebaseConfigured, restoreBackup } from '../../services/storage';
-import { Printer, Save, Check, AlertTriangle, Bluetooth, Link2, MonitorCheck, Database, Cloud, CloudOff, Copy, Download, Upload, HardDriveDownload, HardDriveUpload, Smartphone, Share2, Key } from 'lucide-react';
+import { Printer, Save, Check, AlertTriangle, Bluetooth, Link2, MonitorCheck, Database, Cloud, CloudOff, Download, Upload, HardDriveDownload, HardDriveUpload, Smartphone, Share2, Key, Globe, LayoutGrid, Code, Server, QrCode, Copy, X } from 'lucide-react';
 import { AuthContext } from '../../App';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 const Configuration: React.FC = () => {
   const [config, setConfig] = useState<AppConfig>(getConfig());
@@ -12,17 +13,29 @@ const Configuration: React.FC = () => {
   const [isConnected, setIsConnected] = useState(false);
   
   // Connection State
+  const [showQR, setShowQR] = useState(false);
   const [connectionToken, setConnectionToken] = useState('');
-  const [showLinkInput, setShowLinkInput] = useState(false);
-  const [linkMode, setLinkMode] = useState<'GENERATE' | 'INPUT' | null>(null);
-
+  const [importTokenInput, setImportTokenInput] = useState('');
+  
   // Backup State
   const [showBackupInput, setShowBackupInput] = useState(false);
   const [backupString, setBackupString] = useState('');
 
+  const location = useLocation();
+  const navigate = useNavigate();
+
   useEffect(() => {
       setIsConnected(isFirebaseConfigured());
   }, [config]);
+
+  // Handle Import Link (URL Param)
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const importToken = params.get('import');
+    if (importToken) {
+        processImportToken(importToken);
+    }
+  }, [location]);
   
   const handleSave = () => {
     saveConfig(config);
@@ -59,57 +72,64 @@ const Configuration: React.FC = () => {
       }, 1000);
   };
 
-  // --- NEW SIMPLIFIED CONNECTION LOGIC ---
+  // --- SYNC / LINKING LOGIC ---
 
-  const generateLinkCode = () => {
+  const generateConnectionData = () => {
       if (!config.firebaseConfig) {
-          alert("Primero debes configurar Firebase manualmente en el código o tener una conexión activa.");
+          alert("Primero debes configurar los datos de la nube manualmente o importar una configuración.");
           return;
       }
-      // Encode config to Base64 to make it look like a simple token
       try {
           const jsonStr = JSON.stringify(config.firebaseConfig);
-          const token = btoa(jsonStr);
-          const finalToken = `AVI_LINK_${token}`;
-          
-          navigator.clipboard.writeText(finalToken).then(() => {
-              alert("¡CÓDIGO COPIADO!\n\nEnvía este código por WhatsApp o correo a tu otro dispositivo y pégalo allí para vincularlo.");
-          });
-          setLinkMode('GENERATE');
+          const token = btoa(jsonStr); // Base64 encode
+          setConnectionToken(token);
+          setShowQR(true);
       } catch (e) {
-          alert("Error al generar el código.");
+          alert("Error al generar el código de vinculación.");
       }
   };
 
-  const handleLinkDevice = () => {
+  const processImportToken = (token: string) => {
+      if (!token || !token.trim()) return;
+
       try {
-          let cleanToken = connectionToken.trim();
+          // Remove whitespace just in case
+          const cleanToken = token.trim();
           
-          if (!cleanToken) return;
-
-          // Remove prefix if present
-          if (cleanToken.startsWith('AVI_LINK_')) {
-              cleanToken = cleanToken.replace('AVI_LINK_', '');
+          let jsonStr = '';
+          try {
+             jsonStr = atob(cleanToken);
+          } catch(e) {
+             throw new Error("El código no tiene formato Base64 válido.");
           }
 
-          // Decode
-          const jsonStr = atob(cleanToken);
+          if (!jsonStr) throw new Error("El contenido del código está vacío.");
+
           const parsed = JSON.parse(jsonStr);
-
+          
           if (parsed.apiKey && parsed.projectId) {
-              const newConfig = { ...config, firebaseConfig: parsed };
-              setConfig(newConfig);
-              saveConfig(newConfig);
-              setConnectionToken('');
-              setLinkMode(null);
-              alert("¡VINCULACIÓN EXITOSA!\n\nEste dispositivo ahora está sincronizado con la nube.");
-              window.location.reload(); // Reload to ensure services start
+              if (confirm("🔗 CONFIGURACIÓN DE NUBE DETECTADA\n\n¿Desea vincular este dispositivo ahora?")) {
+                  const newConfig = { ...config, firebaseConfig: parsed };
+                  setConfig(newConfig);
+                  saveConfig(newConfig);
+                  alert("✅ ¡Vinculación Exitosa!\n\nEl sistema se reiniciará para aplicar los cambios.");
+                  // Remove param from URL if present
+                  navigate('/config', { replace: true });
+                  window.location.reload();
+              }
           } else {
-              alert("El código es inválido. Verifica que copiaste todo el texto.");
+              alert("El código es inválido (Faltan datos requeridos).");
           }
-      } catch (e) {
-          alert("Código inválido. Asegúrate de copiar el código completo generado en el dispositivo principal.");
+      } catch(e: any) {
+          console.error("Token error:", e);
+          alert(`Error al procesar el código de vinculación: ${e.message || 'Datos corruptos'}`);
       }
+  };
+
+  const copyToClipboard = () => {
+      navigator.clipboard.writeText(connectionToken).then(() => {
+          alert("Código copiado al portapapeles");
+      });
   };
 
   // --- BACKUP LOGIC ---
@@ -133,6 +153,11 @@ const Configuration: React.FC = () => {
   };
 
   const handleRestoreBackup = () => {
+      if (!backupString || !backupString.trim()) {
+          alert("Por favor, pegue el contenido JSON del respaldo.");
+          return;
+      }
+
       try {
           const parsed = JSON.parse(backupString);
           if (parsed.users && parsed.config) {
@@ -140,274 +165,321 @@ const Configuration: React.FC = () => {
                   restoreBackup(parsed);
               }
           } else {
-              alert("El archivo de respaldo no es válido o está incompleto.");
+              alert("El archivo de respaldo no es válido o está incompleto (Faltan usuarios o configuración).");
           }
-      } catch (e) {
-          alert("Error de formato JSON. Asegúrese de copiar el contenido completo del archivo.");
+      } catch (e: any) {
+          console.error("Backup parse error:", e);
+          alert("Error de lectura: El texto no es un JSON válido.\n\n" + e.message);
       }
   };
 
+  const updateFirebaseConfig = (field: string, value: string) => {
+      setConfig({
+          ...config,
+          firebaseConfig: {
+              ...config.firebaseConfig || {} as any,
+              [field]: value
+          }
+      });
+  };
+
   return (
-    <div className="max-w-3xl mx-auto space-y-8 pb-10">
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 space-y-6">
-        {/* Company Info */}
-        <div>
-          <label className="block text-sm font-bold text-gray-900 mb-2">Nombre de la Empresa</label>
-          <input 
-            value={config.companyName}
-            onChange={e => setConfig({...config, companyName: e.target.value})}
-            className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 font-medium text-gray-900"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-bold text-gray-900 mb-2">Logo (Para Tickets y Reportes)</label>
-          <div className="flex items-center space-x-4">
-            {config.logoUrl ? (
-                <img src={config.logoUrl} alt="Logo" className="h-20 w-20 object-contain border rounded bg-white" />
-            ) : (
-                <div className="h-20 w-20 bg-gray-100 rounded border border-dashed border-gray-300 flex items-center justify-center text-xs text-gray-400">Sin Logo</div>
-            )}
-            <input type="file" onChange={handleLogoUpload} className="text-sm text-gray-600" accept="image/*" />
-          </div>
-        </div>
-
-        <hr className="border-gray-200"/>
-
-        {/* Weighing Defaults */}
-        <div className="grid grid-cols-2 gap-4">
+    <div className="max-w-4xl mx-auto space-y-8 pb-10">
+      
+      {/* HEADER */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
-            <label className="block text-sm font-bold text-gray-900 mb-2">Lote Jabas Llenas (Default)</label>
-            <input 
-              type="number"
-              value={config.defaultFullCrateBatch}
-              onChange={e => setConfig({...config, defaultFullCrateBatch: Number(e.target.value)})}
-              className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 font-bold text-gray-900 text-center"
-            />
+            <h2 className="text-3xl font-black text-slate-900">Configuración del Sistema</h2>
+            <p className="text-slate-500">Ajustes generales y conexión de dispositivos</p>
           </div>
-          <div>
-            <label className="block text-sm font-bold text-gray-900 mb-2">Lote Jabas Vacías (Default)</label>
-            <input 
-              type="number"
-              value={config.defaultEmptyCrateBatch}
-              onChange={e => setConfig({...config, defaultEmptyCrateBatch: Number(e.target.value)})}
-              className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 font-bold text-gray-900 text-center"
-            />
-          </div>
-        </div>
+          <button 
+            onClick={handleSave}
+            className={`flex items-center px-6 py-3 rounded-xl font-bold shadow-lg transition-all ${saved ? 'bg-emerald-600 text-white' : 'bg-blue-900 text-white hover:bg-blue-800'}`}
+          >
+            {saved ? <Check className="mr-2"/> : <Save className="mr-2" />}
+            {saved ? 'Guardado' : 'Guardar Cambios'}
+          </button>
+      </div>
 
-        {/* Peripherals */}
-        <div>
-           <h3 className="font-bold text-lg text-gray-900 mb-4">Vincular Dispositivos</h3>
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-             {/* Printer Card */}
-             <div onClick={() => startScan('PRINTER')} className={`cursor-pointer group relative p-5 rounded-2xl border-2 transition-all overflow-hidden ${config.printerConnected ? 'border-blue-500 bg-blue-50' : 'border-dashed border-gray-300 hover:border-blue-300 hover:bg-gray-50'}`}>
-                 <div className="flex items-center justify-between relative z-10">
-                     <div className="flex items-center space-x-3">
-                         <div className={`p-3 rounded-full ${config.printerConnected ? 'bg-blue-200 text-blue-700' : 'bg-gray-200 text-gray-500'}`}>
-                             <Printer size={24} />
-                         </div>
-                         <div>
-                             <h4 className="font-bold text-gray-800">Impresora</h4>
-                             <p className="text-xs text-gray-500">{config.printerConnected ? 'Vinculada y Lista' : 'Toque para buscar'}</p>
-                         </div>
-                     </div>
-                     <div className={`p-1.5 rounded-full ${config.printerConnected ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-400'}`}>
-                         {config.printerConnected ? <Check size={16} /> : <Link2 size={16} />}
-                     </div>
-                 </div>
-             </div>
-
-             {/* Scale Card */}
-             <div onClick={() => startScan('SCALE')} className={`cursor-pointer group relative p-5 rounded-2xl border-2 transition-all overflow-hidden ${config.scaleConnected ? 'border-emerald-500 bg-emerald-50' : 'border-dashed border-gray-300 hover:border-emerald-300 hover:bg-gray-50'}`}>
-                 <div className="flex items-center justify-between relative z-10">
-                     <div className="flex items-center space-x-3">
-                         <div className={`p-3 rounded-full ${config.scaleConnected ? 'bg-emerald-200 text-emerald-700' : 'bg-gray-200 text-gray-500'}`}>
-                             <Bluetooth size={24} />
-                         </div>
-                         <div>
-                             <h4 className="font-bold text-gray-800">Balanza</h4>
-                             <p className="text-xs text-gray-500">{config.scaleConnected ? 'Vinculada y Lista' : 'Toque para buscar'}</p>
-                         </div>
-                     </div>
-                     <div className={`p-1.5 rounded-full ${config.scaleConnected ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-400'}`}>
-                         {config.scaleConnected ? <Check size={16} /> : <Link2 size={16} />}
-                     </div>
-                 </div>
-             </div>
-           </div>
-        </div>
-
-        {/* FIREBASE CONFIG (ADMIN ONLY) */}
-        {user?.role === UserRole.ADMIN && (
-            <div className="border-t border-gray-200 pt-6">
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-bold text-lg text-gray-900 flex items-center"><Database className="mr-2"/> Nube y Sincronización</h3>
-                    <div className={`px-4 py-1.5 rounded-full text-xs font-black flex items-center ${isConnected ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
-                        {isConnected ? <Cloud size={14} className="mr-2"/> : <CloudOff size={14} className="mr-2"/>}
-                        {isConnected ? "CONECTADO" : "SIN CONEXIÓN"}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          
+          {/* LEFT COLUMN: GENERAL SETTINGS */}
+          <div className="lg:col-span-2 space-y-8">
+              
+              {/* 1. CLOUD SYNC SECTION (HIGHLIGHTED) */}
+              {user?.role === UserRole.ADMIN && (
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div className={`p-4 border-b flex justify-between items-center ${isConnected ? 'bg-emerald-50 border-emerald-100' : 'bg-slate-50 border-slate-200'}`}>
+                        <h3 className="font-bold text-lg text-slate-800 flex items-center">
+                            <Cloud className={`mr-2 ${isConnected ? 'text-emerald-600' : 'text-slate-400'}`} />
+                            Sincronización en Nube
+                        </h3>
+                        <span className={`text-[10px] uppercase font-bold px-2 py-1 rounded border ${isConnected ? 'bg-white text-emerald-600 border-emerald-200' : 'bg-white text-slate-400 border-slate-200'}`}>
+                            {isConnected ? 'CONECTADO' : 'DESCONECTADO'}
+                        </span>
                     </div>
-                </div>
-
-                <div className="bg-slate-50 p-6 rounded-xl border border-slate-200">
-                    <p className="text-sm text-slate-600 mb-6">
-                        Conecte múltiples dispositivos para ver los mismos datos en tiempo real. 
-                    </p>
                     
-                    {!linkMode ? (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                             <button 
-                                onClick={generateLinkCode}
-                                className="bg-white border-2 border-blue-200 p-4 rounded-xl hover:bg-blue-50 transition-all text-left group"
-                             >
-                                 <div className="flex items-center mb-2 text-blue-700 group-hover:scale-105 transition-transform">
-                                     <Share2 className="mr-2"/>
-                                     <span className="font-black">Compartir Conexión</span>
-                                 </div>
-                                 <p className="text-xs text-slate-500">
-                                     Este es el dispositivo principal. Generar código para conectar otros.
-                                 </p>
-                             </button>
-
-                             <button 
-                                onClick={() => setLinkMode('INPUT')}
-                                className="bg-white border-2 border-emerald-200 p-4 rounded-xl hover:bg-emerald-50 transition-all text-left group"
-                             >
-                                 <div className="flex items-center mb-2 text-emerald-700 group-hover:scale-105 transition-transform">
-                                     <Smartphone className="mr-2"/>
-                                     <span className="font-black">Conectar Nuevo Dispositivo</span>
-                                 </div>
-                                 <p className="text-xs text-slate-500">
-                                     Tengo un código de otro dispositivo y quiero pegarlo aquí.
-                                 </p>
-                             </button>
-                        </div>
-                    ) : (
-                        <div className="bg-white p-4 rounded-xl border border-slate-200 animate-fade-in">
-                            <div className="flex justify-between items-center mb-4">
-                                <h4 className="font-bold text-slate-800">
-                                    {linkMode === 'GENERATE' ? 'Código de Vinculación Generado' : 'Ingresar Código de Vinculación'}
-                                </h4>
-                                <button onClick={() => setLinkMode(null)} className="text-xs font-bold text-slate-400 hover:text-slate-600">CANCELAR</button>
-                            </div>
-
-                            {linkMode === 'GENERATE' && (
-                                <div className="text-center py-4">
-                                    <div className="bg-green-100 text-green-800 p-3 rounded-lg text-sm font-bold mb-2">
-                                        ¡Copiado al portapapeles!
-                                    </div>
-                                    <p className="text-xs text-slate-500">
-                                        Pega este código en el nuevo dispositivo seleccionando la opción "Conectar Nuevo Dispositivo".
+                    <div className="p-6">
+                        {!isConnected ? (
+                            <div className="space-y-6">
+                                <div className="bg-blue-50 border border-blue-100 p-6 rounded-xl text-center">
+                                    <Smartphone className="mx-auto text-blue-500 mb-3" size={48} />
+                                    <h4 className="text-xl font-black text-blue-900 mb-2">Vincular Nuevo Dispositivo</h4>
+                                    <p className="text-sm text-blue-700 mb-6 max-w-sm mx-auto">
+                                        Si ya tienes el sistema configurado en otro equipo, genera un código de vinculación allá y pégalo aquí.
                                     </p>
-                                </div>
-                            )}
-
-                            {linkMode === 'INPUT' && (
-                                <div>
-                                    <div className="relative">
-                                        <Key className="absolute left-3 top-3 text-slate-400" size={18}/>
+                                    
+                                    <div className="flex gap-2">
                                         <input 
-                                            value={connectionToken}
-                                            onChange={e => setConnectionToken(e.target.value)}
-                                            placeholder="Pegar código (ej. AVI_LINK_...)"
-                                            className="w-full pl-10 pr-4 py-3 border-2 border-slate-200 rounded-lg font-mono text-sm focus:border-emerald-500 outline-none"
+                                            value={importTokenInput}
+                                            onChange={e => setImportTokenInput(e.target.value)}
+                                            placeholder="Pegar Código de Vinculación aquí..."
+                                            className="flex-1 border-2 border-blue-200 rounded-lg px-4 py-2 font-mono text-sm focus:border-blue-500 outline-none"
+                                        />
+                                        <button 
+                                            onClick={() => processImportToken(importTokenInput)}
+                                            className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 shadow-md"
+                                        >
+                                            VINCULAR
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <div className="relative flex py-2 items-center">
+                                    <div className="flex-grow border-t border-slate-200"></div>
+                                    <span className="flex-shrink-0 mx-4 text-gray-300 text-xs font-bold uppercase">O Configurar Manualmente</span>
+                                    <div className="flex-grow border-t border-slate-200"></div>
+                                </div>
+
+                                {/* Manual Form Updated for Specific Fields */}
+                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 grid grid-cols-1 gap-4">
+                                    <p className="text-xs text-slate-400 font-bold col-span-1">Credenciales de Proyecto Firebase</p>
+                                    
+                                    <div>
+                                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Clave API (API Key)</label>
+                                        <input 
+                                            value={config.firebaseConfig?.apiKey || ''} 
+                                            onChange={e => updateFirebaseConfig('apiKey', e.target.value)} 
+                                            className="w-full p-2 border rounded text-xs font-mono border-slate-300 focus:border-blue-500 outline-none"
+                                            placeholder="Ej. AIzaSy..."
                                         />
                                     </div>
-                                    <button 
-                                        onClick={handleLinkDevice}
-                                        className="w-full mt-3 bg-emerald-600 text-white py-3 rounded-lg font-bold hover:bg-emerald-700 shadow-md flex items-center justify-center"
-                                    >
-                                        <Link2 size={18} className="mr-2"/> VINCULAR AHORA
-                                    </button>
+
+                                    <div>
+                                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Dominio de autenticación</label>
+                                        <input 
+                                            value={config.firebaseConfig?.authDomain || ''} 
+                                            onChange={e => updateFirebaseConfig('authDomain', e.target.value)} 
+                                            className="w-full p-2 border rounded text-xs font-mono border-slate-300 focus:border-blue-500 outline-none"
+                                            placeholder="Ej. mi-app.firebaseapp.com"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">URL de la base de datos <span className="text-blue-500">(Nuevo)</span></label>
+                                        <input 
+                                            value={config.firebaseConfig?.databaseURL || ''} 
+                                            onChange={e => updateFirebaseConfig('databaseURL', e.target.value)} 
+                                            className="w-full p-2 border rounded text-xs font-mono border-blue-200 bg-blue-50 focus:border-blue-500 outline-none"
+                                            placeholder="Ej. https://mi-app.firebaseio.com"
+                                        />
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Identificación del proyecto</label>
+                                            <input 
+                                                value={config.firebaseConfig?.projectId || ''} 
+                                                onChange={e => updateFirebaseConfig('projectId', e.target.value)} 
+                                                className="w-full p-2 border rounded text-xs font-mono border-slate-300 focus:border-blue-500 outline-none"
+                                                placeholder="Ej. mi-proyecto-123"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">ID de la aplicación</label>
+                                            <input 
+                                                value={config.firebaseConfig?.appId || ''} 
+                                                onChange={e => updateFirebaseConfig('appId', e.target.value)} 
+                                                className="w-full p-2 border rounded text-xs font-mono border-slate-300 focus:border-blue-500 outline-none"
+                                                placeholder="Ej. 1:123456:web:..."
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
-                            )}
-                        </div>
-                    )}
-                    
-                    {/* Advanced Toggle Hidden */}
-                    <div className="mt-6 pt-4 border-t border-slate-200">
-                        <details className="text-xs text-slate-400">
-                            <summary className="cursor-pointer hover:text-slate-600 font-bold mb-2">Opciones Avanzadas (Manual)</summary>
-                            <div className="grid grid-cols-1 gap-2 mt-2">
-                                <input 
-                                    placeholder="API Key" 
-                                    value={config.firebaseConfig?.apiKey || ''} 
-                                    onChange={e => setConfig({...config, firebaseConfig: {...config.firebaseConfig, apiKey: e.target.value} as any})}
-                                    className="p-2 border rounded shadow-sm focus:ring-2 focus:ring-blue-500 outline-none" 
-                                />
-                                <input 
-                                    placeholder="Project ID" 
-                                    value={config.firebaseConfig?.projectId || ''} 
-                                    onChange={e => setConfig({...config, firebaseConfig: {...config.firebaseConfig, projectId: e.target.value} as any})}
-                                    className="p-2 border rounded shadow-sm focus:ring-2 focus:ring-blue-500 outline-none" 
-                                />
                             </div>
-                        </details>
+                        ) : (
+                            <div className="text-center">
+                                <p className="text-slate-600 mb-6">Este dispositivo está sincronizado y enviando datos a la nube.</p>
+                                
+                                <button 
+                                    onClick={generateConnectionData}
+                                    className="bg-white border-2 border-slate-200 hover:border-blue-500 hover:text-blue-600 text-slate-700 px-6 py-4 rounded-xl font-bold flex items-center justify-center w-full shadow-sm transition-all group"
+                                >
+                                    <div className="bg-blue-100 p-2 rounded-full mr-3 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                                        <QrCode size={24}/>
+                                    </div>
+                                    <div className="text-left">
+                                        <div className="text-lg">Vincular Otro Dispositivo</div>
+                                        <div className="text-xs font-normal opacity-70">Generar código QR con Clave API y URL de BD</div>
+                                    </div>
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
-            </div>
-        )}
-        
-        {/* DATA BACKUP SECTION */}
-        {user?.role === UserRole.ADMIN && (
-             <div className="border-t border-gray-200 pt-6">
-                 <h3 className="font-bold text-lg text-gray-900 mb-4 flex items-center"><HardDriveDownload className="mr-2"/> Respaldo de Datos (Seguridad)</h3>
-                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
-                     <p className="text-sm text-amber-800 mb-4 font-medium">
-                         Descargue una copia de seguridad de TODOS sus datos locales para evitar pérdidas por cambios de dispositivo o limpieza de caché.
-                     </p>
-                     
-                     <div className="flex flex-col md:flex-row gap-4">
-                         <button 
-                             onClick={handleDownloadBackup}
-                             className="flex-1 bg-white border-2 border-amber-200 text-amber-800 px-4 py-3 rounded-xl font-bold flex items-center justify-center hover:bg-amber-100 shadow-sm transition-all"
-                         >
-                             <Download size={20} className="mr-2"/> DESCARGAR RESPALDO
-                         </button>
-                         <button 
-                             onClick={() => setShowBackupInput(!showBackupInput)}
-                             className="flex-1 bg-white border-2 border-slate-300 text-slate-700 px-4 py-3 rounded-xl font-bold flex items-center justify-center hover:bg-slate-50 shadow-sm transition-all"
-                         >
-                             <Upload size={20} className="mr-2"/> RESTAURAR RESPALDO
-                         </button>
+              )}
+
+              {/* 2. GENERAL INFO */}
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-6">
+                <h3 className="font-bold text-lg text-slate-800 border-b pb-2">Datos de la Empresa</h3>
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Nombre Comercial</label>
+                    <input 
+                        value={config.companyName}
+                        onChange={e => setConfig({...config, companyName: e.target.value})}
+                        className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 font-medium text-gray-900 focus:border-blue-500 outline-none"
+                    />
+                </div>
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Logo (Tickets/Reportes)</label>
+                    <div className="flex items-center space-x-4">
+                        {config.logoUrl ? (
+                            <img src={config.logoUrl} alt="Logo" className="h-20 w-20 object-contain border rounded bg-white" />
+                        ) : (
+                            <div className="h-20 w-20 bg-gray-50 rounded border border-dashed border-gray-300 flex items-center justify-center text-xs text-gray-400">Sin Logo</div>
+                        )}
+                        <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-bold transition-colors">
+                            Subir Imagen
+                            <input type="file" onChange={handleLogoUpload} className="hidden" accept="image/*" />
+                        </label>
+                    </div>
+                </div>
+              </div>
+
+              {/* 3. HARDWARE DEFAULTS */}
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-6">
+                 <h3 className="font-bold text-lg text-slate-800 border-b pb-2">Pesaje Predeterminado</h3>
+                 <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Jabas Llenas (Unidades)</label>
+                        <input 
+                        type="number"
+                        value={config.defaultFullCrateBatch}
+                        onChange={e => setConfig({...config, defaultFullCrateBatch: Number(e.target.value)})}
+                        className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 font-bold text-slate-900 text-center focus:border-blue-500 outline-none"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Jabas Vacías (Unidades)</label>
+                        <input 
+                        type="number"
+                        value={config.defaultEmptyCrateBatch}
+                        onChange={e => setConfig({...config, defaultEmptyCrateBatch: Number(e.target.value)})}
+                        className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 font-bold text-slate-900 text-center focus:border-blue-500 outline-none"
+                        />
+                    </div>
+                 </div>
+              </div>
+          </div>
+
+          {/* RIGHT COLUMN: TOOLS & HARDWARE */}
+          <div className="space-y-8">
+              
+              {/* HARDWARE STATUS */}
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+                 <h3 className="font-bold text-lg text-slate-800 mb-4">Periféricos</h3>
+                 <div className="space-y-3">
+                     <div onClick={() => startScan('PRINTER')} className={`cursor-pointer p-4 rounded-xl border flex items-center justify-between transition-colors ${config.printerConnected ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'}`}>
+                         <div className="flex items-center gap-3">
+                             <Printer size={20} className={config.printerConnected ? 'text-blue-600' : 'text-slate-400'}/>
+                             <div>
+                                 <p className="font-bold text-sm text-slate-900">Impresora BT</p>
+                                 <p className="text-xs text-slate-500">{config.printerConnected ? 'Conectado' : 'Sin conexión'}</p>
+                             </div>
+                         </div>
+                         {config.printerConnected ? <Check size={16} className="text-blue-600"/> : <Link2 size={16} className="text-slate-400"/>}
                      </div>
 
+                     <div onClick={() => startScan('SCALE')} className={`cursor-pointer p-4 rounded-xl border flex items-center justify-between transition-colors ${config.scaleConnected ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'}`}>
+                         <div className="flex items-center gap-3">
+                             <Bluetooth size={20} className={config.scaleConnected ? 'text-emerald-600' : 'text-slate-400'}/>
+                             <div>
+                                 <p className="font-bold text-sm text-slate-900">Balanza Elec.</p>
+                                 <p className="text-xs text-slate-500">{config.scaleConnected ? 'Conectado' : 'Sin conexión'}</p>
+                             </div>
+                         </div>
+                         {config.scaleConnected ? <Check size={16} className="text-emerald-600"/> : <Link2 size={16} className="text-slate-400"/>}
+                     </div>
+                 </div>
+              </div>
+
+              {/* BACKUP TOOLS */}
+              {user?.role === UserRole.ADMIN && (
+                 <div className="bg-amber-50 rounded-2xl shadow-sm border border-amber-200 p-6">
+                     <h3 className="font-bold text-lg text-amber-900 mb-4 flex items-center"><HardDriveDownload size={18} className="mr-2"/> Respaldo Local</h3>
+                     <p className="text-xs text-amber-800 mb-4">Guardar o cargar datos manualmente mediante archivo.</p>
+                     
+                     <div className="grid grid-cols-2 gap-2">
+                         <button onClick={handleDownloadBackup} className="bg-white border border-amber-300 text-amber-800 p-2 rounded-lg text-xs font-bold hover:bg-amber-100 flex flex-col items-center justify-center gap-1">
+                             <Download size={16}/> Descargar
+                         </button>
+                         <button onClick={() => setShowBackupInput(!showBackupInput)} className="bg-white border border-amber-300 text-amber-800 p-2 rounded-lg text-xs font-bold hover:bg-amber-100 flex flex-col items-center justify-center gap-1">
+                             <Upload size={16}/> Cargar
+                         </button>
+                     </div>
+                     
                      {showBackupInput && (
-                         <div className="mt-4 animate-fade-in bg-white p-4 rounded-xl border border-amber-200">
-                             <label className="block text-xs font-bold text-slate-500 mb-2">Pegue aquí el contenido del archivo JSON de respaldo:</label>
+                         <div className="mt-3">
                              <textarea 
                                  value={backupString}
                                  onChange={e => setBackupString(e.target.value)}
-                                 className="w-full h-32 p-3 text-xs font-mono border-2 border-slate-200 rounded-lg focus:border-amber-500 outline-none bg-slate-50"
-                                 placeholder='{ "users": "...", "orders": "..." }'
+                                 className="w-full h-20 p-2 text-[10px] rounded border border-amber-300 mb-2 font-mono"
+                                 placeholder='Pegar contenido JSON aquí...'
                              />
-                             <button onClick={handleRestoreBackup} className="mt-2 bg-amber-600 text-white px-4 py-3 rounded-lg text-sm font-bold w-full hover:bg-amber-700 shadow-md">
-                                 <HardDriveUpload size={18} className="inline mr-2"/> CONFIRMAR RESTAURACIÓN
-                             </button>
+                             <button onClick={handleRestoreBackup} className="w-full bg-amber-600 text-white py-1 rounded text-xs font-bold">RESTAURAR AHORA</button>
                          </div>
                      )}
                  </div>
-             </div>
-        )}
-
-        <div className="flex justify-between items-center pt-8 mt-8 border-t border-gray-200">
-          <button 
-            onClick={handleReset}
-            className="flex items-center text-red-600 hover:text-red-800 px-4 py-2 rounded-lg border border-red-200 hover:bg-red-50 transition-colors font-bold text-sm"
-          >
-            <AlertTriangle className="mr-2" size={16}/>
-            Restablecer Dispositivo
-          </button>
-
-          <button 
-            onClick={handleSave}
-            className={`flex items-center bg-slate-900 text-white px-8 py-3 rounded-xl hover:bg-slate-800 transition-all font-bold shadow-lg ${saved ? 'bg-green-600' : ''}`}
-          >
-            {saved ? <Check className="mr-2"/> : <Save className="mr-2" />}
-            {saved ? 'Guardado' : 'Guardar'}
-          </button>
-        </div>
+              )}
+              
+              <div className="pt-4">
+                  <button onClick={handleReset} className="w-full text-red-500 hover:text-red-700 text-xs font-bold flex items-center justify-center gap-1 p-2 rounded hover:bg-red-50 transition-colors">
+                      <AlertTriangle size={14}/> RESTABLECER FÁBRICA
+                  </button>
+              </div>
+          </div>
       </div>
+
+      {/* QR CODE MODAL */}
+      {showQR && (
+          <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center shadow-2xl relative">
+                  <button onClick={() => setShowQR(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><X/></button>
+                  
+                  <h3 className="text-xl font-black text-slate-900 mb-1">Vincular Dispositivo</h3>
+                  <p className="text-slate-500 text-sm mb-6">Escanea o copia el código en el nuevo equipo</p>
+                  
+                  <div className="bg-white p-4 rounded-xl border-2 border-slate-100 inline-block mb-6 shadow-inner">
+                      {/* Using a simple public QR API for demo purposes without external deps */}
+                      <img 
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(connectionToken)}`} 
+                        alt="QR Code" 
+                        className="w-48 h-48 object-contain"
+                      />
+                  </div>
+
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 mb-4">
+                      <p className="text-[10px] text-slate-400 uppercase font-bold mb-1 text-left">Token de Texto</p>
+                      <div className="flex gap-2">
+                          <input readOnly value={connectionToken} className="flex-1 bg-white border border-slate-200 rounded px-2 py-1 text-xs font-mono text-slate-600 truncate" />
+                          <button onClick={copyToClipboard} className="bg-blue-100 text-blue-600 p-1.5 rounded hover:bg-blue-200"><Copy size={16}/></button>
+                      </div>
+                  </div>
+
+                  <button onClick={() => setShowQR(false)} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold">Listo, Cerrar</button>
+              </div>
+          </div>
+      )}
 
       {/* Scanning Overlay */}
       {isScanning && (
